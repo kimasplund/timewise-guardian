@@ -1,7 +1,8 @@
 {
   "name": "Timewise Guardian",
+  "content_in_root": false,
   "render_readme": true,
   "homeassistant": "2024.1.0",
   "hacs": "1.32.1",
-  "category": "integration"
+  "filename": "timewise_guardian.zip"
 } 
