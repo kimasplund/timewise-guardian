@@ -5,6 +5,10 @@ from typing import Dict, List, Optional, Union
 from datetime import datetime, time
 import json
 
+class PermissionDenied(Exception):
+    """Exception raised when a user lacks required permissions."""
+    pass
+
 class Database:
     """Database handler class."""
 
@@ -440,3 +444,438 @@ class Database:
         
         with open(yaml_path, "w") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False) 
+
+    def check_permission(self, user_id: int, permission_name: str) -> bool:
+        """Check if a user has a specific permission."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Check role-based permissions
+            cursor.execute("""
+                SELECT COUNT(*) FROM users u
+                JOIN roles r ON u.role_id = r.id
+                JOIN role_permissions rp ON r.id = rp.role_id
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE u.id = ? AND p.name = ?
+            """, (user_id, permission_name))
+            if cursor.fetchone()[0] > 0:
+                return True
+            
+            # Check group-based permissions
+            cursor.execute("""
+                SELECT COUNT(*) FROM user_group_members ugm
+                JOIN group_permissions gp ON ugm.group_id = gp.group_id
+                JOIN permissions p ON gp.permission_id = p.id
+                WHERE ugm.user_id = ? AND p.name = ?
+            """, (user_id, permission_name))
+            if cursor.fetchone()[0] > 0:
+                return True
+            
+            # Check override permissions
+            cursor.execute("""
+                SELECT COUNT(*) FROM override_permissions op
+                JOIN permissions p ON op.permission_id = p.id
+                WHERE op.user_id = ? AND p.name = ?
+                AND (op.expires_at IS NULL OR op.expires_at > CURRENT_TIMESTAMP)
+            """, (user_id, permission_name))
+            return cursor.fetchone()[0] > 0
+
+    def require_permission(self, user_id: int, permission_name: str) -> None:
+        """Require a specific permission or raise PermissionDenied."""
+        if not self.check_permission(user_id, permission_name):
+            raise PermissionDenied(f"User {user_id} lacks permission: {permission_name}")
+
+    def get_user_permissions(self, user_id: int) -> List[dict]:
+        """Get all permissions for a user."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            
+            # Get role-based permissions
+            cursor.execute("""
+                SELECT DISTINCT p.name, p.description, 'role' as source, r.name as source_name
+                FROM users u
+                JOIN roles r ON u.role_id = r.id
+                JOIN role_permissions rp ON r.id = rp.role_id
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE u.id = ?
+            """, (user_id,))
+            role_perms = cursor.fetchall()
+            
+            # Get group-based permissions
+            cursor.execute("""
+                SELECT DISTINCT p.name, p.description, 'group' as source, g.name as source_name
+                FROM user_group_members ugm
+                JOIN user_groups g ON ugm.group_id = g.id
+                JOIN group_permissions gp ON ugm.group_id = gp.group_id
+                JOIN permissions p ON gp.permission_id = p.id
+                WHERE ugm.user_id = ?
+            """, (user_id,))
+            group_perms = cursor.fetchall()
+            
+            # Get override permissions
+            cursor.execute("""
+                SELECT DISTINCT p.name, p.description, 'override' as source,
+                       u.ha_username as granted_by, op.expires_at, op.reason
+                FROM override_permissions op
+                JOIN permissions p ON op.permission_id = p.id
+                JOIN users u ON op.granted_by = u.id
+                WHERE op.user_id = ?
+                AND (op.expires_at IS NULL OR op.expires_at > CURRENT_TIMESTAMP)
+            """, (user_id,))
+            override_perms = cursor.fetchall()
+            
+            return role_perms + group_perms + override_perms
+
+    def grant_permission(self, user_id: int, permission_name: str, granted_by: int,
+                        expires_at: Optional[datetime] = None, reason: Optional[str] = None) -> None:
+        """Grant a temporary permission override to a user."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Get permission ID
+            cursor.execute("SELECT id FROM permissions WHERE name = ?", (permission_name,))
+            permission_id = cursor.fetchone()
+            if not permission_id:
+                raise ValueError(f"Invalid permission: {permission_name}")
+            
+            cursor.execute("""
+                INSERT INTO override_permissions
+                (user_id, permission_id, granted_by, expires_at, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, permission_id[0], granted_by, expires_at, reason))
+
+    def revoke_permission(self, user_id: int, permission_name: str) -> None:
+        """Revoke a temporary permission override from a user."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM override_permissions
+                WHERE user_id = ? AND permission_id = (
+                    SELECT id FROM permissions WHERE name = ?
+                )
+            """, (user_id, permission_name))
+
+    def create_user_group(self, name: str, description: str, created_by: int,
+                         permissions: Optional[List[str]] = None) -> int:
+        """Create a new user group."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO user_groups (name, description, created_by)
+                VALUES (?, ?, ?)
+            """, (name, description, created_by))
+            group_id = cursor.lastrowid
+            
+            if permissions:
+                # Add permissions to group
+                cursor.executemany("""
+                    INSERT INTO group_permissions (group_id, permission_id)
+                    SELECT ?, id FROM permissions WHERE name = ?
+                """, [(group_id, perm) for perm in permissions])
+            
+            return group_id
+
+    def add_user_to_group(self, user_id: int, group_id: int) -> None:
+        """Add a user to a group."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO user_group_members (group_id, user_id)
+                VALUES (?, ?)
+            """, (group_id, user_id))
+
+    def remove_user_from_group(self, user_id: int, group_id: int) -> None:
+        """Remove a user from a group."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM user_group_members
+                WHERE group_id = ? AND user_id = ?
+            """, (group_id, user_id))
+
+    def get_user_groups(self, user_id: int) -> List[dict]:
+        """Get all groups a user belongs to."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT g.*, u.ha_username as created_by_name
+                FROM user_groups g
+                JOIN user_group_members ugm ON g.id = ugm.group_id
+                JOIN users u ON g.created_by = u.id
+                WHERE ugm.user_id = ?
+            """, (user_id,))
+            return cursor.fetchall()
+
+    def set_user_role(self, user_id: int, role_name: str) -> None:
+        """Set a user's role."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users SET role_id = (
+                    SELECT id FROM roles WHERE name = ?
+                )
+                WHERE id = ?
+            """, (role_name, user_id))
+
+    def set_parent_child_relationship(self, parent_id: int, child_id: int) -> None:
+        """Set a parent-child relationship between users."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE users SET parent_id = ?
+                WHERE id = ?
+            """, (parent_id, child_id))
+
+    def get_children(self, parent_id: int) -> List[dict]:
+        """Get all children for a parent user."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT u.*, r.name as role_name
+                FROM users u
+                LEFT JOIN roles r ON u.role_id = r.id
+                WHERE u.parent_id = ?
+            """, (parent_id,))
+            return cursor.fetchall() 
+
+    def get_roles(self) -> List[dict]:
+        """Get all roles."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT r.*, COUNT(rp.permission_id) as permission_count
+                FROM roles r
+                LEFT JOIN role_permissions rp ON r.id = rp.role_id
+                GROUP BY r.id
+            """)
+            return cursor.fetchall()
+
+    def create_role(self, name: str, description: str, permissions: Optional[List[str]] = None) -> int:
+        """Create a new role."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO roles (name, description)
+                VALUES (?, ?)
+            """, (name, description))
+            role_id = cursor.lastrowid
+            
+            if permissions:
+                # Add permissions to role
+                cursor.executemany("""
+                    INSERT INTO role_permissions (role_id, permission_id)
+                    SELECT ?, id FROM permissions WHERE name = ?
+                """, [(role_id, perm) for perm in permissions])
+            
+            return role_id
+
+    def update_role(self, role_id: int, name: Optional[str] = None,
+                   description: Optional[str] = None,
+                   permissions: Optional[List[str]] = None) -> None:
+        """Update a role."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Update role details if provided
+            if name or description:
+                updates = []
+                params = []
+                if name:
+                    updates.append("name = ?")
+                    params.append(name)
+                if description:
+                    updates.append("description = ?")
+                    params.append(description)
+                
+                cursor.execute(f"""
+                    UPDATE roles
+                    SET {', '.join(updates)}
+                    WHERE id = ?
+                """, params + [role_id])
+            
+            # Update permissions if provided
+            if permissions is not None:
+                # Remove existing permissions
+                cursor.execute("""
+                    DELETE FROM role_permissions
+                    WHERE role_id = ?
+                """, (role_id,))
+                
+                # Add new permissions
+                cursor.executemany("""
+                    INSERT INTO role_permissions (role_id, permission_id)
+                    SELECT ?, id FROM permissions WHERE name = ?
+                """, [(role_id, perm) for perm in permissions])
+
+    def delete_role(self, role_id: int) -> None:
+        """Delete a role."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            
+            # Check if role is in use
+            cursor.execute("""
+                SELECT COUNT(*) FROM users
+                WHERE role_id = ?
+            """, (role_id,))
+            if cursor.fetchone()[0] > 0:
+                raise ValueError("Cannot delete role that is assigned to users")
+            
+            cursor.execute("""
+                DELETE FROM roles
+                WHERE id = ?
+            """, (role_id,))
+
+    def get_role_permissions(self, role_id: int) -> List[dict]:
+        """Get permissions for a role."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT p.name, p.description
+                FROM role_permissions rp
+                JOIN permissions p ON rp.permission_id = p.id
+                WHERE rp.role_id = ?
+            """, (role_id,))
+            return cursor.fetchall()
+
+    def get_available_permissions(self) -> List[dict]:
+        """Get all available permissions."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM permissions")
+            return cursor.fetchall() 
+
+    def log_permission_change(self, user_id: int, action_type: str, target_type: str,
+                            target_id: int, permission_name: str, performed_by: int,
+                            reason: Optional[str] = None) -> None:
+        """Log a permission change to the audit log."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO permission_audit_log
+                (user_id, action_type, target_type, target_id, permission_name, performed_by, reason)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (user_id, action_type, target_type, target_id, permission_name, performed_by, reason))
+
+    def log_role_change(self, role_id: int, action_type: str, performed_by: int,
+                       details: Optional[Dict] = None, reason: Optional[str] = None) -> None:
+        """Log a role change to the audit log."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            details_json = json.dumps(details) if details else None
+            cursor.execute("""
+                INSERT INTO role_audit_log
+                (role_id, action_type, performed_by, details, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (role_id, action_type, performed_by, details_json, reason))
+
+    def log_group_change(self, group_id: int, action_type: str, performed_by: int,
+                        details: Optional[Dict] = None, reason: Optional[str] = None) -> None:
+        """Log a group change to the audit log."""
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            details_json = json.dumps(details) if details else None
+            cursor.execute("""
+                INSERT INTO group_audit_log
+                (group_id, action_type, performed_by, details, reason)
+                VALUES (?, ?, ?, ?, ?)
+            """, (group_id, action_type, performed_by, details_json, reason))
+
+    def get_permission_audit_logs(self, user_id: Optional[int] = None,
+                                target_type: Optional[str] = None,
+                                target_id: Optional[int] = None,
+                                limit: int = 100) -> List[dict]:
+        """Get permission audit logs with optional filters."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT pal.*, 
+                       u1.ha_username as user_name,
+                       u2.ha_username as performed_by_name
+                FROM permission_audit_log pal
+                JOIN users u1 ON pal.user_id = u1.id
+                JOIN users u2 ON pal.performed_by = u2.id
+                WHERE 1=1
+            """
+            params = []
+            
+            if user_id is not None:
+                query += " AND pal.user_id = ?"
+                params.append(user_id)
+            if target_type:
+                query += " AND pal.target_type = ?"
+                params.append(target_type)
+            if target_id is not None:
+                query += " AND pal.target_id = ?"
+                params.append(target_id)
+            
+            query += " ORDER BY pal.created_at DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def get_role_audit_logs(self, role_id: Optional[int] = None,
+                           limit: int = 100) -> List[dict]:
+        """Get role audit logs with optional filters."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT ral.*,
+                       r.name as role_name,
+                       u.ha_username as performed_by_name
+                FROM role_audit_log ral
+                JOIN roles r ON ral.role_id = r.id
+                JOIN users u ON ral.performed_by = u.id
+                WHERE 1=1
+            """
+            params = []
+            
+            if role_id is not None:
+                query += " AND ral.role_id = ?"
+                params.append(role_id)
+            
+            query += " ORDER BY ral.created_at DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(query, params)
+            return cursor.fetchall()
+
+    def get_group_audit_logs(self, group_id: Optional[int] = None,
+                            limit: int = 100) -> List[dict]:
+        """Get group audit logs with optional filters."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = self._dict_factory
+            cursor = conn.cursor()
+            
+            query = """
+                SELECT gal.*,
+                       g.name as group_name,
+                       u.ha_username as performed_by_name
+                FROM group_audit_log gal
+                JOIN user_groups g ON gal.group_id = g.id
+                JOIN users u ON gal.performed_by = u.id
+                WHERE 1=1
+            """
+            params = []
+            
+            if group_id is not None:
+                query += " AND gal.group_id = ?"
+                params.append(group_id)
+            
+            query += " ORDER BY gal.created_at DESC LIMIT ?"
+            params.append(limit)
+            
+            cursor.execute(query, params)
+            return cursor.fetchall() 

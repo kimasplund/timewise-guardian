@@ -1,0 +1,78 @@
+name: Python Package
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        
+    - name: Install Linux dependencies
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y wmctrl python3-dbus
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install hatch pytest pytest-cov
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+      shell: bash
+        
+    - name: Build package
+      run: python -m hatch build
+        
+    - name: Run tests
+      run: |
+        python -m pytest tests/ --cov=timewise_guardian_client --cov-report=xml
+        
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: true
+        
+    - name: Build Windows executable
+      if: runner.os == 'Windows'
+      run: |
+        pip install pyinstaller
+        pyinstaller --onefile --name timewise-guardian-client src/timewise_guardian_client/cli.py
+        
+    - name: Upload Windows artifact
+      if: runner.os == 'Windows'
+      uses: actions/upload-artifact@v3
+      with:
+        name: timewise-guardian-client-windows
+        path: dist/timewise-guardian-client.exe
+        
+    - name: Build Linux package
+      if: runner.os == 'Linux'
+      run: |
+        pip install pyinstaller
+        pyinstaller --onefile --name timewise-guardian-client src/timewise_guardian_client/cli.py
+        
+    - name: Upload Linux artifact
+      if: runner.os == 'Linux'
+      uses: actions/upload-artifact@v3
+      with:
+        name: timewise-guardian-client-linux
+        path: dist/timewise-guardian-client 

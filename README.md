@@ -1,182 +1,197 @@
-# Timewise Guardian
+# TimeWise Guardian Client
 
-[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
-[![My Home Assistant](https://img.shields.io/badge/My-Home%20Assistant-41BDF5.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/integration_repository/?repository=timewise-guardian)
-
-A Home Assistant integration for monitoring and managing computer usage time with granular control over applications and web content.
-
-## Quick Install
-
-1. Click the My Home Assistant button above, or
-2. Add through HACS (search for "Timewise Guardian")
-
-All required frontend dependencies (Mini Graph Card, ApexCharts Card, and Mushroom Cards) will be installed automatically.
-
-[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=twg)
+A cross-platform client application for the TimeWise Guardian parental control system, designed to work with Home Assistant.
 
 ## Features
 
-- Monitor active users on Windows and Linux computers
-- Track application usage and categorize activities
-- Set time limits for different activity categories
-- Granular control over web content categorization
-- Real-time notifications for time limits
-- Integration with Home Assistant for automation
-- Beautiful dashboards and monitoring interfaces
+- Real-time monitoring of computer usage
+- Process and window tracking
+- Browser activity monitoring
+- Integration with Home Assistant
+- Cross-platform support (Windows and Linux)
+- Configurable time limits and restrictions
+- User activity categorization
+- Notification system
 
 ## Installation
 
-### HACS (Recommended)
+### Windows
 
-1. Add this repository to HACS as a custom repository
-2. Install the "Timewise Guardian" integration
-3. Install required custom cards:
-   - [Mini Graph Card](https://github.com/kalkih/mini-graph-card)
-   - [ApexCharts Card](https://github.com/RomRider/apexcharts-card)
-   - [Mushroom Cards](https://github.com/piitaya/lovelace-mushroom)
-4. Restart Home Assistant
-5. Add the integration through the Home Assistant UI
-
-### Manual Installation
-
-1. Copy the `custom_components/twg` directory to your Home Assistant `custom_components` directory
-2. Install required custom cards (see above)
-3. Restart Home Assistant
-4. Add the integration through the Home Assistant UI
-
-## Client Installation
-
-### Windows Client
-
-```powershell
-# Basic installation
-.\install.ps1 -HAUrl "http://your-ha-instance:8123" -HAToken "your_token"
-
-# With debug logging
-.\install.ps1 -HAUrl "http://your-ha-instance:8123" -HAToken "your_token" -Debug
-```
-
-### Linux Client
+You can install the TimeWise Guardian client using pip:
 
 ```bash
-# Basic installation
-sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" ./install.sh
+pip install timewise-guardian-client
+```
 
-# With debug logging
-sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" DEBUG=true ./install.sh
+Or download the latest Windows executable from the [releases page](https://github.com/kimasplund/timewise-guardian/releases).
+
+### Linux
+
+Install the package using pip:
+
+```bash
+pip install timewise-guardian-client
+```
+
+Or download the latest Linux executable from the [releases page](https://github.com/kimasplund/timewise-guardian/releases).
+
+#### Linux Dependencies
+
+On Ubuntu/Debian:
+
+```bash
+sudo apt-get install wmctrl python3-dbus
+```
+
+On Fedora:
+
+```bash
+sudo dnf install wmctrl python3-dbus
 ```
 
 ## Configuration
 
-1. Install the Home Assistant integration
-2. Configure the client on your computer
-3. Set up activity categories and time limits
-4. Configure notification preferences
+1. Create a configuration file at one of these locations:
+   - Windows: `C:\ProgramData\TimeWise Guardian\config.yaml`
+   - Linux: `/etc/timewise-guardian/config.yaml`
+   - Or specify a custom location with the `-c` option
 
-## Dashboards
+2. Example configuration:
 
-TimeWise Guardian provides three dashboard options:
-
-### 1. YAML Dashboard
-A traditional Home Assistant dashboard with:
-- User activity overview
-- Time limit gauges
-- Weekly statistics
-- Notification history
-- Usage trends
-
-To enable:
 ```yaml
-# configuration.yaml
-lovelace:
-  mode: yaml
-  dashboards:
-    twg:
-      mode: yaml
-      title: TimeWise Guardian
-      icon: mdi:clock-time-eight
-      show_in_sidebar: true
-      filename: custom_components/twg/dashboards/twg_dashboard.yaml
+ha_url: "http://homeassistant.local:8123"
+ha_token: "your_long_lived_access_token"
+
+user_mapping:
+  windows_username: "ha_username"
+  linux_username: "ha_username"
+
+categories:
+  games:
+    processes: ["*.exe"]
+    window_titles: ["*game*"]
+    browser_patterns:
+      urls: ["*game*"]
+      titles: ["*game*"]
+
+time_limits:
+  games: 120  # minutes
+
+time_restrictions:
+  games:
+    weekday:
+      start: "15:00"
+      end: "20:00"
+    weekend:
+      start: "10:00"
+      end: "22:00"
+
+notifications:
+  warning_threshold: 10  # minutes
+  warning_intervals: [30, 15, 10, 5, 1]
+  popup_duration: 10  # seconds
+  sound_enabled: true
 ```
 
-### 2. Lovelace UI Dashboard
-A modern Mushroom-style dashboard with:
-- Overview tab with current status
-- Statistics tab with detailed analytics
-- Settings tab for configuration
-- Interactive charts and system information
+## Usage
 
-### 3. Custom Activity Card
-A specialized card showing:
-- Real-time activity monitoring
-- Progress bars for time limits
-- Color-coded status indicators
-- Responsive grid layout
+### Running as a Service
 
-To use the custom card:
-```yaml
-# configuration.yaml
-frontend:
-  extra_module_url:
-    - /local/twg-activity-card.js
-```
+#### Windows
 
-Example card configuration:
-```yaml
-type: custom:twg-activity-card
-activity_entity: sensor.twg_activity
-time_entity: sensor.twg_time_remaining
-```
+Install as a service:
 
-## Monitoring Features
-
-- Real-time activity tracking
-- Time limit management
-- Usage statistics and trends
-- Category-based monitoring
-- Web content classification
-- Application tracking
-- User session monitoring
-- Notification system
-
-## Uninstallation
-
-### Windows
-```powershell
-# Keep logs and config
-.\uninstall.ps1 -KeepLogs -KeepConfig
-
-# Remove everything
-.\uninstall.ps1 -Force
-```
-
-### Linux
 ```bash
-# Keep logs and config
-sudo KEEP_LOGS=true KEEP_CONFIG=true ./uninstall.sh
-
-# Remove everything
-sudo FORCE=true ./uninstall.sh
+timewise-guardian-client --install
 ```
 
-## Auto-Updates
+Uninstall the service:
 
-The system automatically checks for updates daily and can be configured to:
-- Auto-install updates
-- Use beta channel
-- Customize check interval
-- Backup before updating
+```bash
+timewise-guardian-client --uninstall
+```
+
+#### Linux
+
+Install as a systemd service:
+
+```bash
+sudo timewise-guardian-client --install
+```
+
+Uninstall the service:
+
+```bash
+sudo timewise-guardian-client --uninstall
+```
+
+### Running Manually
+
+Run the client with default configuration:
+
+```bash
+timewise-guardian-client
+```
+
+Specify a custom configuration file:
+
+```bash
+timewise-guardian-client -c /path/to/config.yaml
+```
+
+Enable debug logging:
+
+```bash
+timewise-guardian-client --debug
+```
+
+## Development
+
+1. Clone the repository:
+
+```bash
+git clone https://github.com/kimasplund/timewise-guardian.git
+cd timewise-guardian
+```
+
+2. Create a virtual environment:
+
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux
+venv\Scripts\activate     # Windows
+```
+
+3. Install development dependencies:
+
+```bash
+pip install -e ".[dev]"
+```
+
+4. Run tests:
+
+```bash
+pytest tests/
+```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## Support
+## Author
 
-- Report issues on GitHub
-- Join our Discord community
-- Check the documentation for detailed setup guides 
+Kim Asplund (kim.asplund@gmail.com)
+
+## Links
+
+- [Website](https://asplund.kim)
+- [GitHub Repository](https://github.com/kimasplund/timewise-guardian)
+- [Documentation](https://github.com/kimasplund/timewise-guardian/wiki) 
