@@ -9,8 +9,7 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/kimasplund/timewise-guardian/issues",
   "requirements": [
-    "psutil>=5.9.7",
-    "valkey>=8.0.0"
+    "psutil>=5.9.7"
   ],
   "version": "1.0.0"
 } 

@@ -9,7 +9,7 @@ A Linux client for monitoring computer usage and integrating with Home Assistant
 - Support for time limits and restrictions
 - Real-time notifications
 - Integration with Home Assistant
-- Runs as a systemd service with root privileges
+- Runs as a systemd service
 - Automatic updates and monitoring
 - Multi-distribution support (Debian/Ubuntu, Fedora/RHEL, Arch)
 
@@ -28,28 +28,36 @@ pip3 install timewise-guardian-client
    ```
 3. Install the service:
    ```bash
-   sudo systemctl enable twg
+   sudo timewise-guardian-client --install
    ```
 4. Start the service:
    ```bash
-   sudo systemctl start twg
+   sudo systemctl start timewise-guardian
    ```
 
-### Automated Installation
-Use the installation script for a complete setup:
-```bash
-# Basic installation
-sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" ./install.sh
+### Dependencies
 
-# With debug logging
-sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" DEBUG=true ./install.sh
+#### Debian/Ubuntu
+```bash
+sudo apt-get update
+sudo apt-get install python3-pip python3-venv python3-dev wmctrl python3-dbus
+```
+
+#### Fedora/RHEL
+```bash
+sudo dnf install python3-pip python3-devel wmctrl python3-dbus
+```
+
+#### Arch Linux
+```bash
+sudo pacman -S python-pip wmctrl python-dbus
 ```
 
 ## Configuration
 
 1. The configuration file is located at:
    ```
-   /etc/twg/config.yaml
+   /etc/timewise-guardian/config.yaml
    ```
 2. Configure the following settings:
    - Home Assistant connection details
@@ -113,68 +121,55 @@ time_limits:
 
 ### Logs
 Service logs are stored in:
-- `/var/log/twg/monitor.log`
-- `/var/log/twg/error.log`
-- `/var/log/twg/twg_detailed_YYYYMMDD.log`
-- System journal (`journalctl -u twg`)
+- `/var/log/timewise-guardian/client.log`
+- System journal (`journalctl -u timewise-guardian`)
 
 ### Commands
 ```bash
 # Start service
-sudo systemctl start twg
+sudo systemctl start timewise-guardian
 
 # Stop service
-sudo systemctl stop twg
+sudo systemctl stop timewise-guardian
 
 # Restart service
-sudo systemctl restart twg
+sudo systemctl restart timewise-guardian
 
 # Check status
-sudo systemctl status twg
+sudo systemctl status timewise-guardian
 
 # View logs
-sudo journalctl -u twg -f
-
-# Check service configuration
-sudo systemctl cat twg
-```
-
-## Auto-Updates
-
-The client supports automatic updates:
-```python
-from twg.updater import TWGUpdater
-
-updater = TWGUpdater(
-    current_version="0.1.0",
-    check_interval=24,  # Check every 24 hours
-    auto_update=True,   # Automatically install updates
-    beta_channel=False  # Use stable versions only
-)
+sudo journalctl -u timewise-guardian -f
 ```
 
 ## Manual Usage (without service)
 
-Run the monitor directly:
+Run the client directly:
 
 ```bash
-twg-monitor
+timewise-guardian-client
 ```
 
 Or with a custom config path:
 
 ```bash
-twg-monitor --config /path/to/config.yaml
+timewise-guardian-client -c /path/to/config.yaml
+```
+
+Enable debug logging:
+
+```bash
+timewise-guardian-client --debug
 ```
 
 ## Uninstallation
 
 ```bash
-# Keep logs and config
-sudo KEEP_LOGS=true KEEP_CONFIG=true ./uninstall.sh
+# Uninstall service
+sudo timewise-guardian-client --uninstall
 
-# Remove everything
-sudo FORCE=true ./uninstall.sh
+# Remove package
+sudo pip3 uninstall timewise-guardian-client
 ```
 
 ## Requirements
@@ -184,27 +179,6 @@ sudo FORCE=true ./uninstall.sh
 - Root privileges for service installation
 - X11 or Wayland
 - Home Assistant with Timewise Guardian integration installed
-
-## Distribution-Specific Notes
-
-### Debian/Ubuntu
-```bash
-# Install dependencies
-sudo apt-get update
-sudo apt-get install python3-pip python3-venv python3-dev
-```
-
-### Fedora/RHEL
-```bash
-# Install dependencies
-sudo dnf install python3-pip python3-devel
-```
-
-### Arch Linux
-```bash
-# Install dependencies
-sudo pacman -S python-pip
-```
 
 ## Development
 
@@ -227,7 +201,7 @@ sudo pacman -S python-pip
 
 ### Common Issues
 1. Service won't start:
-   - Check service logs: `journalctl -u twg -n 50`
+   - Check service logs: `journalctl -u timewise-guardian -n 50`
    - Verify Python installation
    - Check configuration file permissions
    - Verify systemd unit file
@@ -252,17 +226,11 @@ sudo pacman -S python-pip
 ### Debug Mode
 Enable debug logging:
 ```bash
-sudo DEBUG=true ./install.sh
-```
-
-Or edit `/etc/twg/config.yaml`:
-```yaml
-logging:
-  level: DEBUG
+timewise-guardian-client --debug
 ```
 
 ### Security
-The service runs with root privileges but implements several security measures:
+The service implements several security measures:
 - Protected system directories
 - Read-only home directory access
 - No new privileges

@@ -27,7 +27,7 @@ pip install timewise-guardian-client
    ```
 3. Install the service:
    ```powershell
-   python -m twg.service install
+   timewise-guardian-client --install
    ```
 4. Start the service:
    ```powershell
@@ -44,16 +44,11 @@ Use the installation script for a complete setup:
 .\install.ps1 -HAUrl "http://your-ha-instance:8123" -HAToken "your_token" -Debug
 ```
 
-To remove the service:
-```powershell
-python -m twg.service remove
-```
-
 ## Configuration
 
 1. The configuration file is located at:
    ```
-   C:\ProgramData\TimeWiseGuardian\config.yaml
+   C:\ProgramData\TimeWise Guardian\config.yaml
    ```
 2. Configure the following settings:
    - Home Assistant connection details
@@ -89,7 +84,7 @@ time_limits:
 
 ### Activity Tracking
 - Real-time window and process monitoring
-- Browser history tracking
+- Browser history tracking (Chrome, Firefox, Edge)
 - YouTube content categorization
 - Application usage statistics
 - User session tracking
@@ -116,8 +111,7 @@ time_limits:
 
 ### Logs
 Service logs are stored in:
-- `C:\ProgramData\TimeWiseGuardian\twg_service.log`
-- `C:\ProgramData\TimeWiseGuardian\logs\twg_detailed_YYYYMMDD.log`
+- `C:\ProgramData\TimeWise Guardian\logs\client.log`
 - Windows Event Viewer under "Applications and Services Logs"
 
 ### Commands
@@ -135,42 +129,34 @@ Restart-Service TimeWiseGuardian
 Get-Service TimeWiseGuardian
 ```
 
-## Auto-Updates
-
-The client supports automatic updates:
-```python
-from twg.updater import TWGUpdater
-
-updater = TWGUpdater(
-    current_version="0.1.0",
-    check_interval=24,  # Check every 24 hours
-    auto_update=True,   # Automatically install updates
-    beta_channel=False  # Use stable versions only
-)
-```
-
 ## Manual Usage (without service)
 
-Run the monitor directly:
+Run the client directly:
 
 ```powershell
-twg-monitor
+timewise-guardian-client
 ```
 
 Or with a custom config path:
 
 ```powershell
-twg-monitor --config /path/to/config.yaml
+timewise-guardian-client -c C:\path\to\config.yaml
+```
+
+Enable debug logging:
+
+```powershell
+timewise-guardian-client --debug
 ```
 
 ## Uninstallation
 
 ```powershell
-# Keep logs and config
-.\uninstall.ps1 -KeepLogs -KeepConfig
+# Uninstall service
+timewise-guardian-client --uninstall
 
-# Remove everything
-.\uninstall.ps1 -Force
+# Remove package
+pip uninstall timewise-guardian-client
 ```
 
 ## Requirements
@@ -183,11 +169,16 @@ twg-monitor --config /path/to/config.yaml
 ## Development
 
 1. Clone the repository
-2. Install development dependencies:
+2. Create virtual environment:
+   ```powershell
+   python -m venv venv
+   .\venv\Scripts\activate
+   ```
+3. Install development dependencies:
    ```powershell
    pip install -e ".[dev]"
    ```
-3. Run tests:
+4. Run tests:
    ```powershell
    pytest
    ```
@@ -199,21 +190,24 @@ twg-monitor --config /path/to/config.yaml
    - Check service logs
    - Verify Python installation
    - Check configuration file permissions
+   - Verify service configuration
 
 2. No data in Home Assistant:
    - Verify Home Assistant connection
    - Check API token
    - Review service logs
+   - Check network connectivity
 
 3. Browser tracking not working:
    - Ensure browser history access
    - Check browser support
    - Verify user permissions
+   - Check browser profile paths
 
 ### Debug Mode
 Enable debug logging:
 ```powershell
-.\install.ps1 -Debug
+timewise-guardian-client --debug
 ```
 
 ## Contributing

@@ -174,6 +174,60 @@ pip install -e ".[dev]"
 pytest tests/
 ```
 
+## Monitoring Features
+
+### Activity Tracking
+- Real-time window and process monitoring
+- Browser history tracking (Firefox, Chrome, Edge)
+- YouTube content categorization
+- Application usage statistics
+- User session tracking
+
+### Time Management
+- Category-based time limits
+- Time restriction schedules
+- Warning notifications
+- Automatic enforcement
+
+### Data Collection
+- Application usage metrics
+- Browser activity data
+- Category statistics
+- Time limit compliance
+
+### Integration
+- Real-time Home Assistant updates
+- Custom sensor entities
+- Dashboard integration
+- Automation support
+
+## Troubleshooting
+
+### Common Issues
+1. Service won't start:
+   - Check service logs
+   - Verify Python installation
+   - Check configuration file permissions
+   - Verify service configuration
+
+2. No data in Home Assistant:
+   - Verify Home Assistant connection
+   - Check API token
+   - Review service logs
+   - Check network connectivity
+
+3. Browser tracking not working:
+   - Ensure browser history access
+   - Check browser support
+   - Verify user permissions
+   - Check browser profile paths
+
+### Debug Mode
+Enable debug logging:
+```bash
+timewise-guardian-client --debug
+```
+
 ## Contributing
 
 1. Fork the repository
