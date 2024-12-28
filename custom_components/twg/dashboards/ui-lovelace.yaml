@@ -1,0 +1,176 @@
+title: TimeWise Guardian
+views:
+  - title: Overview
+    path: overview
+    icon: mdi:monitor-dashboard
+    badges: []
+    cards:
+      - type: custom:mushroom-title-card
+        title: TimeWise Guardian
+        subtitle: Computer Usage Monitoring
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: entity
+            entity: sensor.twg_current_user
+            icon: mdi:account
+          - type: entity
+            entity: sensor.twg_activity
+            icon: mdi:application
+          - type: template
+            icon: mdi:clock-outline
+            content: "{{ states('sensor.twg_time_remaining') }} min"
+
+      - type: custom:mushroom-template-card
+        primary: Current Activity
+        secondary: "{{ states('sensor.twg_activity') }}"
+        icon: mdi:monitor
+        entity: sensor.twg_activity
+        tap_action:
+          action: more-info
+        hold_action:
+          action: none
+
+      - type: custom:mini-graph-card
+        name: Daily Usage
+        entities:
+          - entity: sensor.twg_time_remaining
+            name: Time Used
+            attribute: total_used_today
+        hours_to_show: 24
+        points_per_hour: 2
+        line_width: 2
+        show:
+          legend: true
+          fill: true
+          points: hover
+
+      - type: horizontal-stack
+        cards:
+          - type: custom:mushroom-template-card
+            primary: Games Today
+            secondary: "{{ state_attr('sensor.twg_time_remaining', 'total_used_today') }} / {{ state_attr('sensor.twg_time_remaining', 'daily_limit') }} min"
+            icon: mdi:gamepad-variant
+            icon_color: >
+              {% set used = state_attr('sensor.twg_time_remaining', 'total_used_today') | float %}
+              {% set limit = state_attr('sensor.twg_time_remaining', 'daily_limit') | float %}
+              {% if used >= limit %}red
+              {% elif used >= limit * 0.8 %}yellow
+              {% else %}green{% endif %}
+
+          - type: custom:mushroom-template-card
+            primary: Entertainment Today
+            secondary: "{{ state_attr('sensor.twg_time_remaining', 'total_used_today') }} / {{ state_attr('sensor.twg_time_remaining', 'daily_limit') }} min"
+            icon: mdi:youtube
+            icon_color: >
+              {% set used = state_attr('sensor.twg_time_remaining', 'total_used_today') | float %}
+              {% set limit = state_attr('sensor.twg_time_remaining', 'daily_limit') | float %}
+              {% if used >= limit %}red
+              {% elif used >= limit * 0.8 %}yellow
+              {% else %}green{% endif %}
+
+  - title: Statistics
+    path: statistics
+    icon: mdi:chart-bar
+    cards:
+      - type: custom:apexcharts-card
+        title: Weekly Usage Distribution
+        graph_span: 1week
+        header:
+          show: true
+          title: Time Spent by Category
+        series:
+          - entity: sensor.twg_time_remaining
+            attribute: total_used_today
+            name: Games
+            type: column
+            group_by:
+              duration: 1day
+          - entity: sensor.twg_time_remaining
+            attribute: total_used_today
+            name: Entertainment
+            type: column
+            group_by:
+              duration: 1day
+
+      - type: custom:mini-graph-card
+        name: Usage Trends
+        entities:
+          - entity: sensor.twg_time_remaining
+            name: Games
+            attribute: total_used_today
+          - entity: sensor.twg_time_remaining
+            name: Entertainment
+            attribute: total_used_today
+        hours_to_show: 168
+        points_per_hour: 1
+        aggregate_func: max
+        group_by: date
+        show:
+          graph: bar
+          legend: true
+          labels: true
+
+      - type: custom:mushroom-template-card
+        title: Most Used Applications
+        layout: vertical
+        primary: Top Applications Today
+        secondary: >
+          {% set apps = state_attr('sensor.twg_activity', 'top_applications') %}
+          {% for app in apps %}
+            {{ loop.index }}. {{ app.name }} ({{ app.duration }} min)
+          {% endfor %}
+
+  - title: Settings
+    path: settings
+    icon: mdi:cog
+    cards:
+      - type: entities
+        title: Time Limits
+        entities:
+          - entity: number.twg_games_limit
+            name: Games Daily Limit
+          - entity: number.twg_entertainment_limit
+            name: Entertainment Daily Limit
+
+      - type: custom:mushroom-chips-card
+        chips:
+          - type: entity
+            entity: switch.twg_games_enabled
+            icon: mdi:gamepad-variant
+          - type: entity
+            entity: switch.twg_entertainment_enabled
+            icon: mdi:youtube
+
+      - type: entities
+        title: Time Restrictions
+        entities:
+          - entity: input_datetime.twg_games_start
+            name: Games Start Time
+          - entity: input_datetime.twg_games_end
+            name: Games End Time
+          - entity: input_datetime.twg_entertainment_start
+            name: Entertainment Start Time
+          - entity: input_datetime.twg_entertainment_end
+            name: Entertainment End Time
+
+      - type: entities
+        title: Notification Settings
+        entities:
+          - entity: number.twg_warning_threshold
+            name: Warning Time
+          - entity: switch.twg_notifications_enabled
+            name: Enable Notifications
+          - entity: switch.twg_sound_enabled
+            name: Enable Sound
+
+      - type: markdown
+        title: System Information
+        content: >
+          **Version:** {{ state_attr('sensor.twg_activity', 'version') }}
+          
+          **Last Update:** {{ state_attr('sensor.twg_activity', 'last_update') }}
+          
+          **Status:** {{ states('binary_sensor.twg_service_status') }}
+          
+          **Connected Clients:** {{ state_attr('sensor.twg_activity', 'connected_clients') | length }} 

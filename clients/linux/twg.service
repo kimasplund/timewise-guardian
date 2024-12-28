@@ -1,0 +1,28 @@
+[Unit]
+Description=TimeWise Guardian Monitor
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/local/bin/twg-monitor
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/log/twg/monitor.log
+StandardError=append:/var/log/twg/error.log
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target 

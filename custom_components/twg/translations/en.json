@@ -1,0 +1,32 @@
+{
+    "config": {
+        "step": {
+            "user": {
+                "title": "Timewise Guardian Setup",
+                "description": "Set up your Timewise Guardian integration",
+                "data": {
+                    "name": "Name"
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "current_user": {
+                "name": "Current User",
+                "state": {
+                    "not_implemented": "Not Implemented"
+                }
+            },
+            "current_activity": {
+                "name": "Current Activity",
+                "state": {
+                    "not_implemented": "Not Implemented"
+                }
+            },
+            "time_remaining": {
+                "name": "Time Remaining"
+            }
+        }
+    }
+} 

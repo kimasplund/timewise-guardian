@@ -1,0 +1,131 @@
+title: TimeWise Guardian
+path: twg
+icon: mdi:clock-time-eight
+cards:
+  - type: vertical-stack
+    title: User Activity Overview
+    cards:
+      - type: entities
+        title: Current Status
+        entities:
+          - entity: sensor.twg_current_user
+            name: Active User
+          - entity: sensor.twg_activity
+            name: Current Activity
+          - entity: sensor.twg_time_remaining
+            name: Time Remaining
+
+      - type: history-graph
+        title: Daily Activity
+        hours_to_show: 24
+        entities:
+          - entity: sensor.twg_activity
+            name: Activity History
+
+  - type: horizontal-stack
+    cards:
+      - type: gauge
+        title: Games Time Today
+        entity: sensor.twg_time_remaining
+        attribute: total_used_today
+        name: Games Usage
+        min: 0
+        max: 120
+        severity:
+          green: 0
+          yellow: 80
+          red: 100
+
+      - type: gauge
+        title: Entertainment Time Today
+        entity: sensor.twg_time_remaining
+        attribute: total_used_today
+        name: Entertainment Usage
+        min: 0
+        max: 180
+        severity:
+          green: 0
+          yellow: 120
+          red: 150
+
+  - type: custom:apexcharts-card
+    title: Weekly Usage Statistics
+    graph_span: 1week
+    header:
+      show: true
+      title: Activity Distribution
+    series:
+      - entity: sensor.twg_time_remaining
+        attribute: total_used_today
+        name: Games
+        type: column
+        group_by:
+          duration: 1day
+      - entity: sensor.twg_time_remaining
+        attribute: total_used_today
+        name: Entertainment
+        type: column
+        group_by:
+          duration: 1day
+
+  - type: entities
+    title: Time Limits & Restrictions
+    show_header_toggle: false
+    entities:
+      - entity: sensor.twg_time_remaining
+        attribute: daily_limit
+        name: Daily Game Limit
+      - entity: sensor.twg_time_remaining
+        attribute: daily_limit
+        name: Daily Entertainment Limit
+      - type: section
+        label: Active Restrictions
+      - entity: binary_sensor.twg_games_allowed
+        name: Games Allowed
+      - entity: binary_sensor.twg_entertainment_allowed
+        name: Entertainment Allowed
+
+  - type: markdown
+    title: Recent Notifications
+    content: >
+      {% set notifications = state_attr('sensor.twg_activity', 'recent_notifications') %}
+      {% if notifications %}
+        {% for notification in notifications %}
+          - {{ notification.timestamp }}: {{ notification.message }}
+        {% endfor %}
+      {% else %}
+        No recent notifications
+      {% endif %}
+
+  - type: custom:mini-graph-card
+    title: Category Usage Trends
+    entities:
+      - entity: sensor.twg_time_remaining
+        name: Games
+        attribute: total_used_today
+      - entity: sensor.twg_time_remaining
+        name: Entertainment
+        attribute: total_used_today
+    hours_to_show: 168
+    points_per_hour: 1
+    line_width: 2
+    smoothing: true
+    show:
+      labels: true
+      points: hover
+      legend: true
+      fill: fade
+
+  - type: custom:calendar-card
+    title: Usage Calendar
+    entities:
+      - entity: sensor.twg_activity
+    numberOfDays: 7
+    showProgressBar: true
+    progressBarColor:
+      - color: '#3498db'
+        value: 50
+      - color: '#f1c40f'
+        value: 75
+      - color: '#e74c3c'
+        value: 100 

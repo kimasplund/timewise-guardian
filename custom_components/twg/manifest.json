@@ -1,0 +1,13 @@
+{
+  "domain": "twg",
+  "name": "Timewise Guardian",
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/yourusername/timewise-guardian",
+  "homekit": {},
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/yourusername/timewise-guardian/issues",
+  "requirements": ["psutil>=5.9.0", "browser-history>=0.3.2"],
+  "version": "0.1.0"
+} 
