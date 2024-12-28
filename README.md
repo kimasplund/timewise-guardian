@@ -1,6 +1,16 @@
 # Timewise Guardian
 
+[![hacs_badge](https://img.shields.io/badge/HACS-Default-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+[![My Home Assistant](https://img.shields.io/badge/My-Home%20Assistant-41BDF5.svg?style=for-the-badge)](https://my.home-assistant.io/redirect/integration_repository/?repository=timewise-guardian)
+
 A Home Assistant integration for monitoring and managing computer usage time with granular control over applications and web content.
+
+## Quick Install
+
+1. Click the My Home Assistant button above, or
+2. Add through HACS (search for "Timewise Guardian")
+
+[![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=twg)
 
 ## Features
 
