@@ -4,31 +4,73 @@ from typing import Dict, List, Optional
 from collections import defaultdict
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.components import websocket_api
+from homeassistant.components.websocket_api import (
+    websocket_command,
+    ActiveConnection,
+)
+from homeassistant.components.recorder import history
 import voluptuous as vol
 
 from .const import DOMAIN
 from .models import TWGStore
 
+# Main websocket command handler
 @callback
-@websocket_api.websocket_command({
+@websocket_command({
     vol.Required("type"): "twg/stats/get",
     vol.Required("user_id"): str,
     vol.Optional("computer_id"): str,
     vol.Optional("session_id"): str,
 })
-async def websocket_get_stats(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict) -> None:
+async def websocket_get_stats(hass: HomeAssistant, connection: ActiveConnection, msg: dict) -> None:
     """Handle get stats command."""
-    store = hass.data[DOMAIN][msg["entry_id"]]
-    
-    if "session_id" in msg:
-        stats = await get_session_stats(hass, store, msg["session_id"])
-    elif "computer_id" in msg:
-        stats = await get_computer_stats(hass, store, msg["computer_id"])
-    else:
-        stats = await get_user_stats(hass, store, msg["user_id"])
-    
-    connection.send_result(msg["id"], stats)
+    try:
+        store = hass.data[DOMAIN][msg["entry_id"]]
+        
+        if "session_id" in msg:
+            stats = await get_session_stats(hass, store, msg["session_id"])
+        elif "computer_id" in msg:
+            stats = await get_computer_stats(hass, store, msg["computer_id"])
+        else:
+            stats = await get_user_stats(hass, store, msg["user_id"])
+        
+        connection.send_result(msg["id"], stats)
+    except KeyError as err:
+        connection.send_error(msg["id"], "invalid_entry", f"Entry not found: {err}")
+    except Exception as err:
+        connection.send_error(msg["id"], "stats_error", str(err))
+
+# Main statistics functions
+async def get_user_stats(hass: HomeAssistant, store: TWGStore, user_id: str) -> dict:
+    """Get statistics for a user."""
+    now = datetime.now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start = today - timedelta(days=today.weekday())
+    month_start = today.replace(day=1)
+
+    # Get user's activity history from recorder
+    activity_history = await get_activity_history(hass, store, user_id, month_start)
+
+    # Calculate statistics for different time periods
+    daily_stats = calculate_period_stats(activity_history, today, now)
+    weekly_stats = calculate_period_stats(activity_history, week_start, now)
+    monthly_stats = calculate_period_stats(activity_history, month_start, now)
+
+    # Calculate additional analytics
+    peak_hours = calculate_peak_hours(activity_history)
+    hourly_usage = calculate_hourly_usage(activity_history)
+    category_comparison = calculate_category_comparison(activity_history)
+    trend_analysis = calculate_trend_analysis(activity_history, week_start)
+
+    return {
+        "dailyStats": daily_stats,
+        "weeklyStats": weekly_stats,
+        "monthlyStats": monthly_stats,
+        "peakHours": peak_hours,
+        "hourlyUsage": hourly_usage,
+        "categoryComparison": category_comparison,
+        "trendAnalysis": trend_analysis,
+    }
 
 async def get_computer_stats(hass: HomeAssistant, store: TWGStore, computer_id: str) -> dict:
     """Get statistics for a specific computer."""
@@ -37,7 +79,7 @@ async def get_computer_stats(hass: HomeAssistant, store: TWGStore, computer_id: 
     week_start = today - timedelta(days=today.weekday())
 
     # Get computer's activity history
-    activity_history = await get_activity_history(hass, computer_id, week_start)
+    activity_history = await get_activity_history(hass, store, computer_id, week_start)
 
     # Calculate system metrics
     uptime = calculate_uptime(activity_history)
@@ -60,7 +102,7 @@ async def get_computer_stats(hass: HomeAssistant, store: TWGStore, computer_id: 
 
 async def get_session_stats(hass: HomeAssistant, store: TWGStore, session_id: str) -> dict:
     """Get statistics for a specific user session."""
-    session = await get_session_history(hass, session_id)
+    session = await get_session_history(hass, store, session_id)
     
     if not session:
         return {"error": "Session not found"}
@@ -78,6 +120,48 @@ async def get_session_stats(hass: HomeAssistant, store: TWGStore, session_id: st
         "resourceUsage": calculate_session_resources(session),
         "networkUsage": calculate_session_network(session),
     }
+
+# History retrieval functions
+async def get_activity_history(
+    hass: HomeAssistant,
+    store: TWGStore,
+    identifier: str,
+    start_time: datetime
+) -> List[dict]:
+    """Get activity history from the recorder."""
+    config = store.get_user_config(identifier)
+    if config:
+        # If identifier is a user_id
+        entity_id = f"sensor.twg_user_{identifier}_activity"
+    else:
+        # If identifier is a computer_id
+        entity_id = f"sensor.twg_computer_{identifier}_activity"
+
+    states = await history.get_state_changes(
+        hass,
+        start_time,
+        entity_id=entity_id,
+        no_attributes=False,
+        include_start_time_state=True
+    )
+    
+    return states.get(entity_id, [])
+
+async def get_session_history(
+    hass: HomeAssistant,
+    store: TWGStore,
+    session_id: str
+) -> List[dict]:
+    """Get history for a specific session."""
+    entity_id = f"sensor.twg_session_{session_id}"
+    states = await history.get_state_changes(
+        hass,
+        None,
+        entity_id=entity_id,
+        no_attributes=False,
+        include_start_time_state=True
+    )
+    return states.get(entity_id, [])
 
 def calculate_uptime(history: List[dict]) -> dict:
     """Calculate computer uptime statistics."""
@@ -406,42 +490,6 @@ def calculate_session_network(session: List[dict]) -> dict:
         ],
     }
 
-async def get_session_history(hass: HomeAssistant, session_id: str) -> List[dict]:
-    """Get history for a specific session."""
-    from homeassistant.components.recorder import history
-    return await history.get_state_changes(hass, None, f"sensor.twg_session_{session_id}")
-
-async def get_user_stats(hass: HomeAssistant, store: TWGStore, user_id: str) -> dict:
-    """Get statistics for a user."""
-    now = datetime.now()
-    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    week_start = today - timedelta(days=today.weekday())
-    month_start = today.replace(day=1)
-
-    # Get user's activity history from recorder
-    activity_history = await get_activity_history(hass, user_id, month_start)
-
-    # Calculate statistics for different time periods
-    daily_stats = calculate_period_stats(activity_history, today, now)
-    weekly_stats = calculate_period_stats(activity_history, week_start, now)
-    monthly_stats = calculate_period_stats(activity_history, month_start, now)
-
-    # Calculate additional analytics
-    peak_hours = calculate_peak_hours(activity_history)
-    hourly_usage = calculate_hourly_usage(activity_history)
-    category_comparison = calculate_category_comparison(activity_history)
-    trend_analysis = calculate_trend_analysis(activity_history, week_start)
-
-    return {
-        "dailyStats": daily_stats,
-        "weeklyStats": weekly_stats,
-        "monthlyStats": monthly_stats,
-        "peakHours": peak_hours,
-        "hourlyUsage": hourly_usage,
-        "categoryComparison": category_comparison,
-        "trendAnalysis": trend_analysis,
-    }
-
 def calculate_peak_hours(history: List[dict]) -> List[dict]:
     """Calculate peak usage hours."""
     hourly_counts = defaultdict(int)
@@ -538,13 +586,6 @@ def calculate_state_duration(state: dict, history: List[dict]) -> float:
         (next_state.last_updated if next_state else datetime.now()) - state.last_updated
     ).total_seconds() / 60
     return duration
-
-async def get_activity_history(hass: HomeAssistant, user_id: str, start_time: datetime) -> List[dict]:
-    """Get activity history from the recorder."""
-    from homeassistant.components.recorder import history
-
-    entity_id = f"sensor.twg_{user_id}_activity"
-    return await history.get_state_changes(hass, start_time, entity_id=entity_id)
 
 def calculate_period_stats(history: List[dict], start_time: datetime, end_time: datetime) -> List[dict]:
     """Calculate statistics for a specific time period."""

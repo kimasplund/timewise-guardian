@@ -10,10 +10,11 @@ from homeassistant.core import HomeAssistant
 from .const import DOMAIN
 from .models import TWGStore
 from .config_panel import async_setup_panel
+from .websocket_api import async_setup_websocket_api
 from .statistics import websocket_get_stats
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS = [Platform.SENSOR]
 
 # Verify Python version
 if sys.version_info < (3, 8):
@@ -35,8 +36,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Set up config panel
     await async_setup_panel(hass, entry)
 
-    # Register websocket commands
-    hass.components.websocket_api.async_register_command(websocket_get_stats)
+    # Set up websocket API
+    await async_setup_websocket_api(hass)
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
