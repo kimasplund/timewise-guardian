@@ -10,6 +10,8 @@ A Home Assistant integration for monitoring and managing computer usage time wit
 1. Click the My Home Assistant button above, or
 2. Add through HACS (search for "Timewise Guardian")
 
+All required frontend dependencies (Mini Graph Card, ApexCharts Card, and Mushroom Cards) will be installed automatically.
+
 [![Open your Home Assistant instance and start setting up a new integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=twg)
 
 ## Features

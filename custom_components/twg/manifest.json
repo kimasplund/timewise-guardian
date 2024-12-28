@@ -1,13 +1,32 @@
 {
   "domain": "twg",
   "name": "Timewise Guardian",
-  "codeowners": [],
+  "codeowners": ["@kimasplund"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/yourusername/timewise-guardian",
+  "documentation": "https://github.com/kimasplund/timewise-guardian",
   "homekit": {},
   "iot_class": "local_push",
-  "issue_tracker": "https://github.com/yourusername/timewise-guardian/issues",
+  "issue_tracker": "https://github.com/kimasplund/timewise-guardian/issues",
   "requirements": ["psutil>=5.9.0", "browser-history>=0.3.2"],
-  "version": "0.1.0"
+  "version": "0.1.0",
+  "frontend_js_module": "twg-activity-card.js",
+  "after_dependencies": ["frontend", "http"],
+  "hacs": {
+    "auto_install_frontend_dependencies": true,
+    "frontend_dependencies": [
+      {
+        "repository": "kalkih/mini-graph-card",
+        "version": "v0.11.0"
+      },
+      {
+        "repository": "RomRider/apexcharts-card",
+        "version": "v2.0.0"
+      },
+      {
+        "repository": "piitaya/lovelace-mushroom",
+        "version": "v3.5.0"
+      }
+    ]
+  }
 } 
