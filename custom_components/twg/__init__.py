@@ -1,5 +1,6 @@
 """The Timewise Guardian integration."""
 import logging
+import sys
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,6 +14,14 @@ from .statistics import websocket_get_stats
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
+
+# Verify Python version
+if sys.version_info < (3, 8):
+    _LOGGER.critical(
+        "Python 3.8 or higher is required for Timewise Guardian. Current version: %s",
+        sys.version
+    )
+    raise RuntimeError("Python 3.8 or higher is required")
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Timewise Guardian from a config entry."""
