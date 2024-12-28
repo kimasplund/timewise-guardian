@@ -1,0 +1,30 @@
+{
+  "name": "timewise-guardian",
+  "version": "1.0.0",
+  "description": "Computer usage monitoring and time management for Home Assistant",
+  "author": "Kim Asplund <kim.asplund@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "lit": "^3.1.0",
+    "lit-element": "^4.0.2",
+    "@material/mwc-button": "^0.27.0",
+    "@material/mwc-icon-button": "^0.27.0",
+    "@material/mwc-ripple": "^0.27.0",
+    "@mdi/js": "^7.4.47",
+    "apexcharts": "^3.45.1",
+    "custom-card-helpers": "^1.9.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6",
+    "@typescript-eslint/eslint-plugin": "^6.17.0",
+    "@typescript-eslint/parser": "^6.17.0",
+    "eslint": "^8.56.0",
+    "prettier": "^3.1.1"
+  },
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint . --ext .ts",
+    "format": "prettier --write \"**/*.{ts,js,json}\""
+  }
+} 
