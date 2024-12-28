@@ -1,6 +1,6 @@
-# Timewise Guardian Windows Client
+# Timewise Guardian Linux Client
 
-A Windows client for monitoring computer usage and integrating with Home Assistant's Timewise Guardian component.
+A Linux client for monitoring computer usage and integrating with Home Assistant's Timewise Guardian component.
 
 ## Features
 
@@ -9,51 +9,47 @@ A Windows client for monitoring computer usage and integrating with Home Assista
 - Support for time limits and restrictions
 - Real-time notifications
 - Integration with Home Assistant
-- Runs as a Windows service with administrative privileges
+- Runs as a systemd service with root privileges
 - Automatic updates and monitoring
+- Multi-distribution support (Debian/Ubuntu, Fedora/RHEL, Arch)
 
 ## Installation
 
 ### Standard Installation
-```powershell
-pip install timewise-guardian-client
+```bash
+pip3 install timewise-guardian-client
 ```
 
 ### Service Installation
-1. Open an Administrator PowerShell prompt
+1. Open a terminal with root privileges
 2. Install the package:
-   ```powershell
-   pip install timewise-guardian-client
+   ```bash
+   sudo pip3 install timewise-guardian-client
    ```
 3. Install the service:
-   ```powershell
-   python -m twg.service install
+   ```bash
+   sudo systemctl enable twg
    ```
 4. Start the service:
-   ```powershell
-   Start-Service TimeWiseGuardian
+   ```bash
+   sudo systemctl start twg
    ```
 
 ### Automated Installation
 Use the installation script for a complete setup:
-```powershell
+```bash
 # Basic installation
-.\install.ps1 -HAUrl "http://your-ha-instance:8123" -HAToken "your_token"
+sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" ./install.sh
 
 # With debug logging
-.\install.ps1 -HAUrl "http://your-ha-instance:8123" -HAToken "your_token" -Debug
-```
-
-To remove the service:
-```powershell
-python -m twg.service remove
+sudo HA_URL="http://your-ha-instance:8123" HA_TOKEN="your_token" DEBUG=true ./install.sh
 ```
 
 ## Configuration
 
 1. The configuration file is located at:
    ```
-   C:\ProgramData\TimeWiseGuardian\config.yaml
+   /etc/twg/config.yaml
    ```
 2. Configure the following settings:
    - Home Assistant connection details
@@ -69,12 +65,13 @@ ha_url: "http://homeassistant.local:8123"
 ha_token: "your_long_lived_access_token"
 
 user_mapping:
-  "DESKTOP-ABC123\\JohnDoe": "john"
+  "username": "ha_user"
 
 categories:
   games:
     processes:
-      - minecraft.exe
+      - minecraft
+      - steam
     browser_patterns:
       urls:
         - "*minecraft.net*"
@@ -88,8 +85,8 @@ time_limits:
 ## Monitoring Features
 
 ### Activity Tracking
-- Real-time window and process monitoring
-- Browser history tracking
+- Real-time window and process monitoring (X11 and Wayland support)
+- Browser history tracking (Firefox, Chrome, Chromium)
 - YouTube content categorization
 - Application usage statistics
 - User session tracking
@@ -97,7 +94,7 @@ time_limits:
 ### Time Management
 - Category-based time limits
 - Time restriction schedules
-- Warning notifications
+- Warning notifications (desktop notifications)
 - Automatic enforcement
 
 ### Data Collection
@@ -116,23 +113,30 @@ time_limits:
 
 ### Logs
 Service logs are stored in:
-- `C:\ProgramData\TimeWiseGuardian\twg_service.log`
-- `C:\ProgramData\TimeWiseGuardian\logs\twg_detailed_YYYYMMDD.log`
-- Windows Event Viewer under "Applications and Services Logs"
+- `/var/log/twg/monitor.log`
+- `/var/log/twg/error.log`
+- `/var/log/twg/twg_detailed_YYYYMMDD.log`
+- System journal (`journalctl -u twg`)
 
 ### Commands
-```powershell
+```bash
 # Start service
-Start-Service TimeWiseGuardian
+sudo systemctl start twg
 
 # Stop service
-Stop-Service TimeWiseGuardian
+sudo systemctl stop twg
 
 # Restart service
-Restart-Service TimeWiseGuardian
+sudo systemctl restart twg
 
 # Check status
-Get-Service TimeWiseGuardian
+sudo systemctl status twg
+
+# View logs
+sudo journalctl -u twg -f
+
+# Check service configuration
+sudo systemctl cat twg
 ```
 
 ## Auto-Updates
@@ -153,42 +157,69 @@ updater = TWGUpdater(
 
 Run the monitor directly:
 
-```powershell
+```bash
 twg-monitor
 ```
 
 Or with a custom config path:
 
-```powershell
+```bash
 twg-monitor --config /path/to/config.yaml
 ```
 
 ## Uninstallation
 
-```powershell
+```bash
 # Keep logs and config
-.\uninstall.ps1 -KeepLogs -KeepConfig
+sudo KEEP_LOGS=true KEEP_CONFIG=true ./uninstall.sh
 
 # Remove everything
-.\uninstall.ps1 -Force
+sudo FORCE=true ./uninstall.sh
 ```
 
 ## Requirements
 
-- Windows 10 or later
+- Linux distribution with systemd
 - Python 3.8 or later
-- Administrative privileges for service installation
+- Root privileges for service installation
+- X11 or Wayland
 - Home Assistant with Timewise Guardian integration installed
+
+## Distribution-Specific Notes
+
+### Debian/Ubuntu
+```bash
+# Install dependencies
+sudo apt-get update
+sudo apt-get install python3-pip python3-venv python3-dev
+```
+
+### Fedora/RHEL
+```bash
+# Install dependencies
+sudo dnf install python3-pip python3-devel
+```
+
+### Arch Linux
+```bash
+# Install dependencies
+sudo pacman -S python-pip
+```
 
 ## Development
 
 1. Clone the repository
-2. Install development dependencies:
-   ```powershell
+2. Create virtual environment:
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+3. Install development dependencies:
+   ```bash
    pip install -e ".[dev]"
    ```
-3. Run tests:
-   ```powershell
+4. Run tests:
+   ```bash
    pytest
    ```
 
@@ -196,25 +227,48 @@ twg-monitor --config /path/to/config.yaml
 
 ### Common Issues
 1. Service won't start:
-   - Check service logs
+   - Check service logs: `journalctl -u twg -n 50`
    - Verify Python installation
    - Check configuration file permissions
+   - Verify systemd unit file
 
 2. No data in Home Assistant:
    - Verify Home Assistant connection
    - Check API token
    - Review service logs
+   - Check network connectivity
 
 3. Browser tracking not working:
    - Ensure browser history access
    - Check browser support
    - Verify user permissions
+   - Check browser profile paths
+
+4. Desktop notifications not working:
+   - Verify D-Bus configuration
+   - Check notification daemon
+   - Test with `notify-send`
 
 ### Debug Mode
 Enable debug logging:
-```powershell
-.\install.ps1 -Debug
+```bash
+sudo DEBUG=true ./install.sh
 ```
+
+Or edit `/etc/twg/config.yaml`:
+```yaml
+logging:
+  level: DEBUG
+```
+
+### Security
+The service runs with root privileges but implements several security measures:
+- Protected system directories
+- Read-only home directory access
+- No new privileges
+- Restricted namespaces
+- Memory protections
+- Real-time restrictions
 
 ## Contributing
 
