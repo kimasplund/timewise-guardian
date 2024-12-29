@@ -61,14 +61,17 @@ async def test_ha_settings_update():
                 "window_titles": ["Game"]
             }
         },
+        "blocked_categories": ["youtube_gaming", "social_media"],
+        "youtube_restrictions": {
+            "blocked_categories": ["gaming", "entertainment"]
+        },
+        "blocked_patterns": [r"youtube\.com/watch\?v=.*&category=20"],
         "time_limits": {
             "games": 120
         }
     }
     config.update_ha_settings(test_settings)
-    assert config.get_category_processes("games") == ["game.exe"]
-    assert config.get_category_window_titles("games") == ["Game"]
-    assert config.get_time_limit("games") == 120
+    assert config.ha_settings == test_settings
 
 async def test_config_save(temp_config_file):
     """Test saving configuration."""
