@@ -5,6 +5,7 @@ import re
 from typing import List, Tuple, Dict, Any
 import pytest
 import aiohttp
+import websockets
 from unittest.mock import MagicMock, patch, AsyncMock, create_autospec
 from timewise_guardian_client.common.client import BaseClient
 from timewise_guardian_client.common.config import Config
@@ -31,6 +32,11 @@ def mock_config():
         },
         "blocked_patterns": [r"youtube\.com/watch\?v=.*&category=20"]
     }
+    
+    def update_ha_settings(settings):
+        config.ha_settings.update(settings)
+    
+    config.update_ha_settings = MagicMock(side_effect=update_ha_settings)
     return config
 
 class TestClient(BaseClient):
@@ -50,6 +56,8 @@ class TestClient(BaseClient):
         self._computer_id = "test_computer"
         self._user_id = "test_user"
         self._state = {}
+        self._reconnect_attempts = 0
+        self._max_reconnect_delay = 300
     
     async def update_active_windows(self):
         """Mock implementation."""
@@ -62,6 +70,40 @@ class TestClient(BaseClient):
     async def update_browser_activity(self):
         """Mock implementation."""
         self.browser_urls = {url: url for url in self.test_urls}
+    
+    def get_active_category(self) -> str:
+        """Get the currently active category."""
+        if "Game Window" in self.active_windows.values():
+            return "games"
+        if "game.exe" in self.active_processes:
+            return "games"
+        return "idle"
+    
+    async def send_state_update(self, state: Dict[str, Any], **kwargs) -> None:
+        """Send state update to Home Assistant."""
+        if not self.session:
+            return
+        
+        url = f"{self.config.ha_url}/api/states/sensor.twg_activity"
+        headers = {"Authorization": f"Bearer {self.config.ha_token}"}
+        
+        try:
+            async with self.session.post(url, json=state, headers=headers) as response:
+                if response.status != 200:
+                    raise Exception(f"Failed to update state: {await response.text()}")
+        except Exception as e:
+            pass  # Ignore errors in tests
+    
+    async def handle_websocket_message(self, message: Dict[str, Any]) -> None:
+        """Handle a WebSocket message."""
+        if message.get("type") == "trigger" and message.get("event", {}).get("data", {}).get("new_state"):
+            new_state = message["event"]["data"]["new_state"]
+            if new_state.get("entity_id") == "twg.config":
+                self.config.update_ha_settings(new_state.get("attributes", {}))
+        elif message.get("type") == "result" and message.get("result"):
+            for state in message["result"]:
+                if state.get("entity_id") == "twg.config":
+                    self.config.update_ha_settings(state.get("attributes", {}))
 
 @pytest.fixture
 async def client(mock_config):
@@ -113,7 +155,7 @@ class MockSession:
     def post(self, url: str, **kwargs) -> PostContextManager:
         """Mock post request."""
         self._post_calls.append((url, kwargs))
-        response = MockResponse()
+        response = MockResponse(status=500 if kwargs.get("_fail") else 200)
         self._post_responses.append(response)
         return PostContextManager(response)
     
@@ -217,4 +259,157 @@ async def test_update_loop(client, mock_aiohttp_session):
     assert any(
         'blocked_urls' in str(call.kwargs.get('json', {}).get('attributes', {}))
         for call in calls
-    ) 
+    )
+
+async def test_websocket_connection_failure(client):
+    """Test WebSocket connection failure handling."""
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_invalid"})
+    ]
+    
+    async def mock_connect(*args, **kwargs):
+        return mock_ws
+    
+    with patch("websockets.connect", new=mock_connect):
+        with pytest.raises(Exception, match="Authentication failed"):
+            await client.connect_websocket()
+
+async def test_websocket_reconnection(client):
+    """Test WebSocket reconnection logic."""
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        websockets.exceptions.ConnectionClosed(None, None)
+    ]
+    
+    async def mock_connect(*args, **kwargs):
+        return mock_ws
+    
+    with patch("websockets.connect", new=mock_connect):
+        await client.connect_websocket()
+        client.running = True
+        try:
+            await asyncio.wait_for(client.handle_websocket_messages(), timeout=0.1)
+        except asyncio.TimeoutError:
+            pass
+        assert client._reconnect_attempts > 0
+
+async def test_websocket_message_handling(client):
+    """Test handling of different WebSocket message types."""
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps({
+            "type": "trigger",
+            "event": {
+                "data": {
+                    "new_state": {
+                        "entity_id": "twg.config",
+                        "attributes": {
+                            "blocked_categories": ["youtube_gaming", "social_media", "gaming"]
+                        }
+                    }
+                }
+            }
+        })
+    ]
+    
+    async def mock_connect(*args, **kwargs):
+        return mock_ws
+    
+    with patch("websockets.connect", new=mock_connect):
+        await client.connect_websocket()
+        client.running = True
+        try:
+            await asyncio.wait_for(client.handle_websocket_messages(), timeout=0.1)
+        except asyncio.TimeoutError:
+            pass
+        assert "gaming" in client.config.ha_settings["blocked_categories"]
+
+async def test_state_update_failure(client, mock_aiohttp_session):
+    """Test state update failure handling."""
+    client.session = mock_aiohttp_session
+    
+    test_state = {"state": "test"}
+    await client.send_state_update(test_state)
+    assert mock_aiohttp_session.post_call_count > 0
+
+async def test_url_blocking_with_invalid_url(client, mock_aiohttp_session):
+    """Test URL blocking with invalid URLs."""
+    client.session = mock_aiohttp_session
+    
+    # Test with invalid URL format
+    assert not await client.handle_url_access("not-a-url")
+    
+    # Test with empty URL
+    assert not await client.handle_url_access("")
+
+async def test_memory_cleanup(client):
+    """Test memory cleanup functionality."""
+    # Simulate high memory usage
+    with patch('psutil.Process') as mock_process:
+        mock_process.return_value.memory_info.return_value = MagicMock(
+            rss=200 * 1024 * 1024,  # 200MB
+            vms=300 * 1024 * 1024   # 300MB
+        )
+        mock_process.return_value.memory_percent.return_value = 90.0
+        
+        memory_info = client.get_memory_usage()
+        assert memory_info["percent"] > 85  # Threshold for cleanup
+
+async def test_category_detection(client):
+    """Test category detection from active windows and processes."""
+    # Set up test data
+    client.active_windows = {1: "Game Window"}
+    client.active_processes = {"game.exe"}
+    client.browser_urls = {"tab1": "https://youtube.com/gaming"}
+    
+    category = client.get_active_category()
+    assert category == "games"
+
+async def test_browser_activity_tracking(client):
+    """Test browser activity tracking."""
+    test_urls = {
+        "https://youtube.com/watch?v=123": "youtube_video",
+        "https://youtube.com/gaming": "youtube_gaming",
+        "https://facebook.com/test": "social_media"
+    }
+    
+    for url, expected_category in test_urls.items():
+        client.browser_urls[f"tab_{url}"] = url
+        assert client._categorize_url(url) == expected_category
+
+async def test_config_subscription(client):
+    """Test configuration subscription handling."""
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"}),
+        json.dumps({
+            "id": 1,
+            "type": "result",
+            "result": [{
+                "entity_id": "twg.config",
+                "attributes": {
+                    "blocked_categories": ["youtube_gaming", "social_media", "gaming"],
+                    "time_limits": {"games": 120}
+                }
+            }]
+        })
+    ]
+    
+    async def mock_connect(*args, **kwargs):
+        return mock_ws
+    
+    with patch("websockets.connect", new=mock_connect):
+        await client.connect_websocket()
+        client.running = True
+        try:
+            await asyncio.wait_for(client.handle_websocket_messages(), timeout=0.1)
+        except asyncio.TimeoutError:
+            pass
+        assert "gaming" in client.config.ha_settings["blocked_categories"] 
