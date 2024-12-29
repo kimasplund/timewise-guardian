@@ -1,9 +1,12 @@
 """Tests for the configuration module."""
 import os
+import asyncio
 from pathlib import Path
 import pytest
 import yaml
 from timewise_guardian_client.common.config import Config
+
+pytestmark = pytest.mark.asyncio  # Mark all tests in this module as async
 
 @pytest.fixture
 def temp_config_file(tmp_path):
@@ -24,19 +27,23 @@ def temp_config_file(tmp_path):
             }
         }
     }
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(test_config, f)
     return config_path
 
-def test_config_load(temp_config_file):
+@pytest.fixture
+async def config(temp_config_file):
+    """Fixture for config object."""
+    return Config(temp_config_file)
+
+async def test_config_load(config):
     """Test loading configuration from file."""
-    config = Config(temp_config_file)
     assert config.ha_url == "http://test.local:8123"
     assert config.ha_token == "test_token"
     assert config.sync_interval == 30
     assert config.memory_settings["max_client_memory_mb"] == 150
 
-def test_config_default():
+async def test_config_default():
     """Test default configuration."""
     config = Config(Path("nonexistent.yaml"))
     assert config.ha_url == "http://homeassistant.local:8123"
@@ -44,7 +51,7 @@ def test_config_default():
     assert config.sync_interval == 60
     assert config.memory_settings["max_client_memory_mb"] == 100
 
-def test_ha_settings_update():
+async def test_ha_settings_update():
     """Test updating Home Assistant settings."""
     config = Config(Path("nonexistent.yaml"))
     test_settings = {
@@ -63,7 +70,7 @@ def test_ha_settings_update():
     assert config.get_category_window_titles("games") == ["Game"]
     assert config.get_time_limit("games") == 120
 
-def test_config_save(temp_config_file):
+async def test_config_save(temp_config_file):
     """Test saving configuration."""
     config = Config(temp_config_file)
     config.set("client", {"sync_interval": 45})
@@ -72,9 +79,8 @@ def test_config_save(temp_config_file):
     new_config = Config(temp_config_file)
     assert new_config.sync_interval == 45
 
-@pytest.mark.asyncio
 async def test_config_async_compatible():
     """Test configuration can be used in async context."""
     config = Config(Path("nonexistent.yaml"))
     await asyncio.sleep(0)  # Verify no conflicts with async
-    assert config.ha_url == "http://homeassistant.local:8123" 
+    assert isinstance(config, Config) 

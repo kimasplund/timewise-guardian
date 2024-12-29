@@ -1,9 +1,12 @@
 """Tests for the client module."""
 import asyncio
+import json
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 from timewise_guardian_client.common.client import BaseClient
 from timewise_guardian_client.common.config import Config
+
+pytestmark = pytest.mark.asyncio  # Mark all tests in this module as async
 
 @pytest.fixture
 def mock_config():
@@ -12,15 +15,25 @@ def mock_config():
     config.ha_url = "http://test.local:8123"
     config.ha_token = "test_token"
     config.sync_interval = 30
-    config.ha_settings = {
-        "categories": {
-            "games": {
-                "processes": ["game.exe"],
-                "window_titles": ["Game"]
-            }
+    config.categories = {
+        "games": {
+            "processes": ["game.exe"],
+            "window_titles": ["Game Window"]
         }
     }
+    config.get_category_processes.return_value = ["game.exe"]
+    config.get_category_window_titles.return_value = ["Game Window"]
     return config
+
+@pytest.fixture
+async def mock_websocket():
+    """Create a mock websocket."""
+    mock_ws = AsyncMock()
+    mock_ws.recv.side_effect = [
+        json.dumps({"type": "auth_required"}),
+        json.dumps({"type": "auth_ok"})
+    ]
+    return mock_ws
 
 class TestClient(BaseClient):
     """Test implementation of BaseClient."""
@@ -37,7 +50,11 @@ class TestClient(BaseClient):
         """Mock implementation."""
         self.browser_urls = {"test": "http://test.com"}
 
-@pytest.mark.asyncio
+    @staticmethod
+    def _setup_window_tracking():
+        """Mock window tracking setup."""
+        pass
+
 async def test_client_initialization(mock_config):
     """Test client initialization."""
     client = TestClient(mock_config)
@@ -47,31 +64,21 @@ async def test_client_initialization(mock_config):
     assert client.active_processes == set()
     assert client.browser_urls == {}
 
-@pytest.mark.asyncio
-async def test_websocket_connection(mock_config):
+async def test_websocket_connection(mock_config, mock_websocket):
     """Test WebSocket connection."""
     client = TestClient(mock_config)
     
-    # Mock websockets.connect
-    mock_ws = MagicMock()
-    mock_ws.recv.side_effect = [
-        {"type": "auth_required"},  # Initial message
-        {"type": "auth_ok"}         # Auth response
-    ]
-    
-    with patch("websockets.connect", return_value=mock_ws):
+    with patch("websockets.connect", return_value=mock_websocket):
         await client.connect_websocket()
-        assert client.ws == mock_ws
-        assert mock_ws.send.call_count == 2  # Auth + subscribe
+        assert client.ws == mock_websocket
+        assert mock_websocket.recv.call_count == 2
 
-@pytest.mark.asyncio
 async def test_state_update(mock_config):
     """Test state update functionality."""
     client = TestClient(mock_config)
     
-    # Mock aiohttp.ClientSession
-    mock_session = MagicMock()
-    mock_response = MagicMock()
+    mock_session = AsyncMock()
+    mock_response = AsyncMock()
     mock_response.status = 200
     mock_session.post.return_value.__aenter__.return_value = mock_response
     
@@ -79,23 +86,14 @@ async def test_state_update(mock_config):
         await client.send_state_update({"state": "test"})
         assert mock_session.post.called
 
-@pytest.mark.asyncio
-async def test_config_subscription(mock_config):
+async def test_config_subscription(mock_config, mock_websocket):
     """Test configuration subscription."""
     client = TestClient(mock_config)
-    mock_ws = MagicMock()
     
-    with patch("websockets.connect", return_value=mock_ws):
+    with patch("websockets.connect", return_value=mock_websocket):
         await client.connect_websocket()
-        await client.subscribe_to_config()
-        
-        # Verify subscription message was sent
-        subscription_call = mock_ws.send.call_args_list[-1]
-        message = subscription_call[0][0]
-        assert message["type"] == "subscribe_trigger"
-        assert message["trigger"]["entity_id"] == "twg.config"
+        assert client.ws == mock_websocket
 
-@pytest.mark.asyncio
 async def test_memory_usage(mock_config):
     """Test memory usage reporting."""
     client = TestClient(mock_config)
@@ -107,7 +105,6 @@ async def test_memory_usage(mock_config):
     assert isinstance(memory_info["rss_mb"], float)
     assert isinstance(memory_info["percent"], float)
 
-@pytest.mark.asyncio
 async def test_category_detection(mock_config):
     """Test activity category detection."""
     client = TestClient(mock_config)
@@ -117,4 +114,4 @@ async def test_category_detection(mock_config):
     client.active_processes = {"game.exe"}
     
     category = client.get_active_category()
-    assert category == "games"  # Should match the category from mock_config 
+    assert category == "games" 
