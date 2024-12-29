@@ -1,160 +1,124 @@
 #!/bin/bash
 
-# TimeWise Guardian Installation Script
-set -e
+# TimeWise Guardian Linux Installation Script
 
 # Default values
-HA_URL=${HA_URL:-"http://homeassistant.local:8123"}
-HA_TOKEN=${HA_TOKEN:-""}
-FORCE=${FORCE:-false}
-DEBUG=${DEBUG:-false}
+INSTALL_DIR="/opt/timewise-guardian"
+CONFIG_DIR="/etc/timewise-guardian"
+LOG_DIR="/var/log/timewise-guardian"
+SYSTEMD_DIR="/etc/systemd/system"
+MAX_MEMORY=100
+CLEANUP_INTERVAL=5
+DEBUG=false
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
-# Log function
-log() {
-    echo -e "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a /var/log/twg/install.log
-}
-
-# Error handler
-error() {
-    log "${RED}Error: $1${NC}"
-    exit 1
-}
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --max-memory)
+            MAX_MEMORY="$2"
+            shift 2
+            ;;
+        --cleanup-interval)
+            CLEANUP_INTERVAL="$2"
+            shift 2
+            ;;
+        --debug)
+            DEBUG=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
-    error "Please run as root"
+    echo "Please run as root"
+    exit 1
 fi
 
-# Create necessary directories
-mkdir -p /var/log/twg
-mkdir -p /etc/twg
+# Create directories
+mkdir -p "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
 
-# Install Python and dependencies
-log "Installing system dependencies..."
+# Install dependencies
 if command -v apt-get &> /dev/null; then
-    # Debian/Ubuntu
     apt-get update
-    apt-get install -y python3 python3-pip python3-venv python3-dev
+    apt-get install -y python3 python3-pip libnotify-bin
 elif command -v dnf &> /dev/null; then
-    # Fedora/RHEL
-    dnf install -y python3 python3-pip python3-devel
+    dnf install -y python3 python3-pip libnotify
 elif command -v pacman &> /dev/null; then
-    # Arch Linux
-    pacman -Sy --noconfirm python python-pip
+    pacman -Sy python python-pip libnotify --noconfirm
 else
-    error "Unsupported package manager"
+    echo "Unsupported package manager"
+    exit 1
 fi
 
-# Create virtual environment
-log "Creating virtual environment..."
-python3 -m venv /opt/twg
-source /opt/twg/bin/activate
-
-# Install/upgrade pip
-log "Upgrading pip..."
-pip install --upgrade pip
-
-# Install TimeWise Guardian
-log "Installing TimeWise Guardian..."
-pip install --upgrade timewise-guardian-client
-
-# Create configuration
-if [ ! -f "/etc/twg/config.yaml" ] || [ "$FORCE" = true ]; then
-    log "Creating configuration file..."
-    cat > /etc/twg/config.yaml << EOF
-ha_url: "${HA_URL}"
-ha_token: "${HA_TOKEN}"
-
-user_mapping:
-  "$(whoami)": "$(whoami)"
-
-categories:
-  games:
-    processes:
-      - minecraft
-      - steam
-    browser_patterns:
-      urls:
-        - "*minecraft.net*"
-        - "*steampowered.com*"
-
-time_limits:
-  games: 120  # 2 hours per day
-
-notifications:
-  warning_threshold: 10
-  warning_intervals: [30, 15, 10, 5, 1]
-  popup_duration: 10
-  sound_enabled: true
-EOF
-
-    if [ "$DEBUG" = true ]; then
-        echo -e "\nlogging:\n  level: DEBUG" >> /etc/twg/config.yaml
-    fi
-fi
+# Install Python package
+pip3 install --upgrade timewise-guardian-client
 
 # Create systemd service
-log "Installing systemd service..."
-cat > /etc/systemd/system/twg.service << EOF
+cat > "$SYSTEMD_DIR/timewise-guardian.service" << EOL
 [Unit]
-Description=TimeWise Guardian Monitor
+Description=TimeWise Guardian
 After=network.target
 
 [Service]
 Type=simple
-User=root
-Group=root
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/twg/bin/twg-monitor --config /etc/twg/config.yaml
+ExecStart=/usr/local/bin/twg-service
 Restart=always
-RestartSec=5
-StandardOutput=append:/var/log/twg/monitor.log
-StandardError=append:/var/log/twg/error.log
-
-# Security hardening
-ProtectSystem=strict
-ProtectHome=read-only
-PrivateTmp=true
-NoNewPrivileges=true
-ProtectKernelTunables=true
-ProtectKernelModules=true
-ProtectControlGroups=true
-RestrictNamespaces=true
-MemoryDenyWriteExecute=true
-RestrictRealtime=true
+RestartSec=60
+User=root
+Environment=PYTHONUNBUFFERED=1
 
 [Install]
 WantedBy=multi-user.target
-EOF
+EOL
 
-# Set permissions
-log "Setting permissions..."
-chmod 600 /etc/twg/config.yaml
-chmod 644 /etc/systemd/system/twg.service
-chown -R root:root /etc/twg
-chown -R root:root /var/log/twg
+# Create config file if it doesn't exist
+if [ ! -f "$CONFIG_DIR/config.yaml" ]; then
+    cat > "$CONFIG_DIR/config.yaml" << EOL
+---
+# Home Assistant connection settings
+homeassistant:
+  url: "http://homeassistant.local:8123"
+  token: ""
 
-# Start service
-log "Starting service..."
-systemctl daemon-reload
-systemctl enable twg
-systemctl start twg
+# Client settings
+client:
+  auto_register: true
+  sync_interval: 60
+  memory_management:
+    max_client_memory_mb: $MAX_MEMORY
+    cleanup_interval_minutes: $CLEANUP_INTERVAL
+    memory_threshold: 90
+  notification_backend: "notify-send"
+  process_monitor: "psutil"
+  window_manager: "auto"
 
-# Check service status
-if systemctl is-active --quiet twg; then
-    log "${GREEN}TimeWise Guardian has been installed and started successfully!${NC}"
-    echo -e "\nConfiguration file: /etc/twg/config.yaml"
-    echo "Logs directory: /var/log/twg"
-    echo "Service status: $(systemctl status twg | grep Active)"
-else
-    error "Service failed to start. Check logs at /var/log/twg/error.log"
+# All other settings are managed through Home Assistant
+EOL
+
+    if [ "$DEBUG" = true ]; then
+        echo "logging:" >> "$CONFIG_DIR/config.yaml"
+        echo "  level: DEBUG" >> "$CONFIG_DIR/config.yaml"
+    fi
 fi
 
-# Cleanup
-deactivate 
+# Set permissions
+chown -R root:root "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
+chmod 755 "$INSTALL_DIR" "$CONFIG_DIR" "$LOG_DIR"
+chmod 644 "$CONFIG_DIR/config.yaml"
+
+# Enable and start service
+systemctl daemon-reload
+systemctl enable timewise-guardian
+systemctl start timewise-guardian
+
+echo "TimeWise Guardian has been installed successfully!"
+echo "Configuration file: $CONFIG_DIR/config.yaml"
+echo "Log directory: $LOG_DIR"
+echo "Memory limit: $MAX_MEMORY MB"
+echo "Cleanup interval: $CLEANUP_INTERVAL minutes"
+echo "Service status: $(systemctl is-active timewise-guardian)" 

@@ -4,112 +4,13 @@ homeassistant:
   url: "http://192.168.2.20:8123"
   token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI2YjE4MjYxYWQxYTA0YWM3OTgwYmM2ZGEyZTE3MjZkZSIsImlhdCI6MTczNTQxODA2OSwiZXhwIjoyMDUwNzc4MDY5fQ.Qg1LD20T6dSTh0b1kl7Uz74uFyGuU_unC3IBErL-mKQ"
 
-# User mapping
-user_mapping:
-  "DESKTOP-ABC123\\JohnDoe": "john"
-  "LAPTOP-XYZ789\\JaneSmith": "jane"
+# Client settings
+client:
+  auto_register: true
+  sync_interval: 60  # Seconds between syncs with HA
+  memory_management:
+    max_client_memory_mb: 100
+    cleanup_interval_minutes: 5
+    memory_threshold: 90
 
-# Activity categories and their patterns
-categories:
-  games:
-    processes:
-      - minecraft.exe
-      - steam.exe
-      - roblox.exe
-      - fortnite.exe
-    window_titles:
-      - "*Minecraft*"
-      - "*Steam*"
-      - "*Roblox*"
-      - "*Fortnite*"
-    browser_patterns:
-      urls:
-        - "*minecraft.net*"
-        - "*steampowered.com*"
-        - "*roblox.com*"
-        - "*epicgames.com*"
-      titles:
-        - "*Minecraft Gameplay*"
-        - "*Gaming Stream*"
-        - "*Let's Play*"
-      youtube_channels:
-        - "UCq6VFHwMzcMXbuKyG7SQYIg"  # Minecraft
-        - "UCFAiFyGs6oDiF1Nf-rRJpZA"  # Fortnite
-
-  learning:
-    processes:
-      - code.exe
-      - python.exe
-      - jupyter-notebook.exe
-    window_titles:
-      - "*Visual Studio Code*"
-      - "*Python*"
-      - "*Learning*"
-      - "*Course*"
-    browser_patterns:
-      urls:
-        - "*github.com*"
-        - "*stackoverflow.com*"
-        - "*coursera.org*"
-        - "*edx.org*"
-        - "*udemy.com*"
-      titles:
-        - "*Tutorial*"
-        - "*Course*"
-        - "*Learning*"
-        - "*Programming*"
-      youtube_channels:
-        - "UC8butISFwT-Wl7EV0hUK0BQ"  # freeCodeCamp
-        - "UCWv7vMbMWH4-V0ZXdmDpPBA"  # Programming with Mosh
-
-  entertainment:
-    processes:
-      - netflix.exe
-      - spotify.exe
-      - vlc.exe
-    window_titles:
-      - "*Netflix*"
-      - "*Spotify*"
-      - "*YouTube*"
-    browser_patterns:
-      urls:
-        - "*netflix.com*"
-        - "*youtube.com*"
-        - "*spotify.com*"
-      titles:
-        - "*Movie*"
-        - "*TV Show*"
-        - "*Music*"
-      exclude:
-        - "*Tutorial*"
-        - "*Learning*"
-        - "*Course*"
-
-# Time limits (in minutes)
-time_limits:
-  games: 120  # 2 hours per day
-  entertainment: 180  # 3 hours per day
-
-# Time restrictions
-time_restrictions:
-  games:
-    weekday:
-      start: "15:00"  # After school
-      end: "21:00"    # Before bedtime
-    weekend:
-      start: "10:00"
-      end: "22:00"
-  entertainment:
-    weekday:
-      start: "17:00"
-      end: "22:00"
-    weekend:
-      start: "10:00"
-      end: "23:00"
-
-# Notification settings
-notifications:
-  warning_threshold: 10  # Minutes before limit
-  warning_intervals: [30, 15, 10, 5, 1]  # Minutes remaining
-  popup_duration: 10  # Seconds to show popup
-  sound_enabled: true 
+# All other settings (categories, time limits, restrictions, etc.) are managed through Home Assistant 

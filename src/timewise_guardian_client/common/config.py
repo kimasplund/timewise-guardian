@@ -13,6 +13,7 @@ class Config:
         """Initialize configuration."""
         self.config_path = config_path
         self.config: Dict[str, Any] = {}
+        self.ha_settings: Dict[str, Any] = {}  # Dynamic settings from HA
         self.load()
 
     def load(self) -> None:
@@ -42,81 +43,78 @@ class Config:
     def get_default_config(self) -> Dict[str, Any]:
         """Get default configuration."""
         return {
-            "ha_url": "http://homeassistant.local:8123",
-            "ha_token": "",
-            "user_mapping": {},
-            "categories": {
-                "games": {
-                    "processes": ["*.exe"],
-                    "window_titles": ["*game*"],
-                    "browser_patterns": {
-                        "urls": ["*game*"],
-                        "titles": ["*game*"]
-                    }
+            "homeassistant": {
+                "url": "http://homeassistant.local:8123",
+                "token": ""
+            },
+            "client": {
+                "auto_register": True,
+                "sync_interval": 60,
+                "memory_management": {
+                    "max_client_memory_mb": 100,
+                    "cleanup_interval_minutes": 5,
+                    "memory_threshold": 90
                 }
-            },
-            "time_limits": {
-                "games": 120  # minutes
-            },
-            "time_restrictions": {
-                "games": {
-                    "weekday": {
-                        "start": "15:00",
-                        "end": "20:00"
-                    },
-                    "weekend": {
-                        "start": "10:00",
-                        "end": "22:00"
-                    }
-                }
-            },
-            "notifications": {
-                "warning_threshold": 10,  # minutes
-                "warning_intervals": [30, 15, 10, 5, 1],  # minutes
-                "popup_duration": 10,  # seconds
-                "sound_enabled": True
             }
         }
 
+    def update_ha_settings(self, settings: Dict[str, Any]) -> None:
+        """Update settings received from Home Assistant."""
+        self.ha_settings = settings
+        logger.debug("Updated Home Assistant settings: %s", settings)
+
     def get(self, key: str, default: Any = None) -> Any:
-        """Get configuration value."""
-        return self.config.get(key, default)
+        """Get configuration value, checking HA settings first."""
+        # Check HA settings first for dynamic config
+        if key in ["categories", "time_limits", "time_restrictions", "notifications"]:
+            return self.ha_settings.get(key, default)
+        # Fall back to local config for client settings
+        return self.config.get("client", {}).get(key) or self.config.get(key, default)
 
     def set(self, key: str, value: Any) -> None:
         """Set configuration value."""
+        if key in ["categories", "time_limits", "time_restrictions", "notifications"]:
+            logger.warning("Cannot set %s locally, it is managed by Home Assistant", key)
+            return
         self.config[key] = value
         self.save()
 
     @property
     def ha_url(self) -> str:
         """Get Home Assistant URL."""
-        return self.get("ha_url", "http://homeassistant.local:8123")
+        return self.config.get("homeassistant", {}).get("url", "http://homeassistant.local:8123")
 
     @property
     def ha_token(self) -> str:
         """Get Home Assistant token."""
-        return self.get("ha_token", "")
+        return self.config.get("homeassistant", {}).get("token", "")
 
-    def get_user_mapping(self, username: str) -> Optional[str]:
-        """Get Home Assistant username for system username."""
-        return self.get("user_mapping", {}).get(username)
+    @property
+    def memory_settings(self) -> Dict[str, Any]:
+        """Get memory management settings."""
+        return self.config.get("client", {}).get("memory_management", {})
+
+    @property
+    def sync_interval(self) -> int:
+        """Get sync interval in seconds."""
+        return self.config.get("client", {}).get("sync_interval", 60)
 
     def get_category_processes(self, category: str) -> list:
-        """Get process patterns for category."""
-        return self.get("categories", {}).get(category, {}).get("processes", [])
+        """Get process patterns for category from HA settings."""
+        return self.ha_settings.get("categories", {}).get(category, {}).get("processes", [])
 
     def get_category_window_titles(self, category: str) -> list:
-        """Get window title patterns for category."""
-        return self.get("categories", {}).get(category, {}).get("window_titles", [])
+        """Get window title patterns for category from HA settings."""
+        return self.ha_settings.get("categories", {}).get(category, {}).get("window_titles", [])
 
     def get_category_browser_patterns(self, category: str) -> Dict[str, list]:
-        """Get browser patterns for category."""
-        return self.get("categories", {}).get(category, {}).get("browser_patterns", {})
+        """Get browser patterns for category from HA settings."""
+        return self.ha_settings.get("categories", {}).get(category, {}).get("browser_patterns", {})
 
     def get_time_limit(self, category: str) -> Optional[int]:
-        """Get time limit for category in minutes."""
-        return self.get("time_limits", {}).get(category)
+        """Get time limit for category in minutes from HA settings."""
+        return self.ha_settings.get("time_limits", {}).get(category)
 
     def get_time_restrictions(self, category: str) -> Dict[str, Dict[str, str]]:
-        """Get time restrictions for category."""
-        return self.get("time_restrictions", {}).get(category, {}) 
+        """Get time restrictions for category from HA settings."""
+        return self.ha_settings.get("time_restrictions", {}).get(category, {}) 
