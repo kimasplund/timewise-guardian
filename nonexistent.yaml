@@ -1,0 +1,10 @@
+client:
+  auto_register: true
+  memory_management:
+    cleanup_interval_minutes: 5
+    max_client_memory_mb: 100
+    memory_threshold: 90
+  sync_interval: 60
+homeassistant:
+  token: ''
+  url: http://homeassistant.local:8123

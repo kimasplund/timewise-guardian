@@ -3,7 +3,7 @@
   "name": "Timewise Guardian",
   "codeowners": ["@kimasplund"],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": ["http", "recorder"],
   "documentation": "https://github.com/kimasplund/timewise-guardian",
   "homekit": {},
   "iot_class": "local_polling",

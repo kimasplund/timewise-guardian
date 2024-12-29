@@ -55,3 +55,9 @@ docs/_build/
 *.bak
 *.swp
 *~ 
+
+.venv/
+venv/
+env/
+.env/
+.venv/
