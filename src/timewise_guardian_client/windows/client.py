@@ -12,6 +12,7 @@ from pathlib import Path
 import os
 import glob
 import shutil
+import time
 
 from ..common.client import BaseClient
 from ..common.config import Config
@@ -201,7 +202,7 @@ class WindowsClient(BaseClient):
                     retry_count += 1
                     if retry_count == max_retries:
                         return urls
-                    asyncio.sleep(1)  # Wait a second before retrying
+                    time.sleep(1)  # Wait a second before retrying
 
             try:
                 with sqlite3.connect(temp_db) as conn:

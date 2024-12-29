@@ -9,6 +9,7 @@ from typing import Dict, Optional, Set
 from pathlib import Path
 import glob
 import shutil
+import time
 
 from ..common.client import BaseClient
 from ..common.config import Config
@@ -200,7 +201,7 @@ class LinuxClient(BaseClient):
                     retry_count += 1
                     if retry_count == max_retries:
                         return urls
-                    asyncio.sleep(1)  # Wait a second before retrying
+                    time.sleep(1)  # Wait a second before retrying
 
             try:
                 with sqlite3.connect(temp_db) as conn:

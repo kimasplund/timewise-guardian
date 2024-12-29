@@ -4,6 +4,7 @@ import json
 import logging
 import platform
 import re
+import datetime
 from typing import Dict, List, Optional, Set, Any
 import aiohttp
 import websockets
@@ -184,22 +185,22 @@ class BaseClient:
             return
 
         self._message_id += 1
-        await self.ws.send({
+        await self.ws.send(json.dumps({
             "id": self._message_id,
             "type": "subscribe_trigger",
             "trigger": {
                 "platform": "state",
                 "entity_id": "twg.config"
             }
-        })
+        }))
 
         # Get initial config
         self._message_id += 1
-        await self.ws.send({
+        await self.ws.send(json.dumps({
             "id": self._message_id,
             "type": "get_states",
             "entity_id": "twg.config"
-        })
+        }))
 
     async def handle_websocket_messages(self) -> None:
         """Handle incoming WebSocket messages."""
