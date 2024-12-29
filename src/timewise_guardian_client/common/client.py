@@ -3,12 +3,14 @@ import asyncio
 import json
 import logging
 import platform
+import re
 from typing import Dict, List, Optional, Set, Any
 import aiohttp
 import websockets
 import psutil
 from aiohttp import ClientTimeout
 from websockets.exceptions import WebSocketException
+from urllib.parse import urlparse, parse_qs
 
 from .config import Config
 
@@ -16,6 +18,27 @@ logger = logging.getLogger(__name__)
 
 class BaseClient:
     """Base client class for platform-specific implementations."""
+
+    # Common URL patterns for content categorization
+    URL_PATTERNS = {
+        'youtube': {
+            'domains': ['youtube.com', 'youtu.be'],
+            'categories': {
+                'gaming': [r'/gaming', r'&category=20'],
+                'music': [r'/music', r'&category=10'],
+                'education': [r'/education', r'&category=27'],
+                'entertainment': [r'/entertainment', r'&category=24']
+            }
+        },
+        'social_media': {
+            'domains': ['facebook.com', 'twitter.com', 'instagram.com', 'tiktok.com'],
+            'patterns': [r'^https?://[^/]*(?:facebook\.com|twitter\.com|instagram\.com|tiktok\.com)']
+        },
+        'gaming': {
+            'domains': ['twitch.tv', 'steam.com', 'epicgames.com'],
+            'patterns': [r'^https?://[^/]*(?:twitch\.tv|steam\.com|epicgames\.com)']
+        }
+    }
 
     def __init__(self, config: Config):
         """Initialize client."""
@@ -29,6 +52,97 @@ class BaseClient:
         self._message_id = 0
         self._reconnect_attempts = 0
         self._max_reconnect_delay = 300  # 5 minutes
+        self._blocked_urls: Set[str] = set()
+        self._url_categories: Dict[str, List[str]] = {}
+
+    def _categorize_url(self, url: str) -> Optional[str]:
+        """Categorize a URL based on predefined patterns."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc.lower()
+            path = parsed.path.lower()
+            query = parse_qs(parsed.query)
+
+            # Check YouTube specific categorization
+            if any(yt_domain in domain for yt_domain in self.URL_PATTERNS['youtube']['domains']):
+                # Check if it's a video
+                if '/watch' in path:
+                    video_id = query.get('v', [None])[0]
+                    if video_id:
+                        # Check category from config
+                        for category, patterns in self.URL_PATTERNS['youtube']['categories'].items():
+                            if any(re.search(pattern, path) for pattern in patterns):
+                                return f'youtube_{category}'
+                        return 'youtube_video'
+                
+                # Check YouTube section
+                for category, patterns in self.URL_PATTERNS['youtube']['categories'].items():
+                    if any(re.search(pattern, path) for pattern in patterns):
+                        return f'youtube_{category}'
+                
+                return 'youtube'
+
+            # Check social media
+            if any(domain.endswith(social_domain) for social_domain in self.URL_PATTERNS['social_media']['domains']):
+                return 'social_media'
+
+            # Check gaming sites
+            if any(domain.endswith(gaming_domain) for gaming_domain in self.URL_PATTERNS['gaming']['domains']):
+                return 'gaming'
+
+        except Exception as e:
+            logger.error("Error categorizing URL %s: %s", url, str(e))
+
+        return None
+
+    def _should_block_url(self, url: str) -> bool:
+        """Check if a URL should be blocked based on configuration."""
+        try:
+            # Get URL category
+            category = self._categorize_url(url)
+            if not category:
+                return False
+
+            # Check if category is blocked
+            blocked_categories = self.config.ha_settings.get("blocked_categories", {})
+            if category in blocked_categories:
+                logger.info("Blocking URL %s (category: %s)", url, category)
+                return True
+
+            # Check for specific URL patterns
+            blocked_patterns = self.config.ha_settings.get("blocked_patterns", [])
+            if any(re.search(pattern, url) for pattern in blocked_patterns):
+                logger.info("Blocking URL %s (matched pattern)", url)
+                return True
+
+            # Check YouTube specific restrictions
+            if category.startswith('youtube_'):
+                yt_restrictions = self.config.ha_settings.get("youtube_restrictions", {})
+                subcategory = category.split('_')[1]
+                if subcategory in yt_restrictions.get("blocked_categories", []):
+                    logger.info("Blocking YouTube %s content: %s", subcategory, url)
+                    return True
+
+        except Exception as e:
+            logger.error("Error checking URL block status %s: %s", url, str(e))
+
+        return False
+
+    async def handle_url_access(self, url: str) -> bool:
+        """Handle URL access attempt and return whether it should be blocked."""
+        if self._should_block_url(url):
+            self._blocked_urls.add(url)
+            # Notify Home Assistant about blocked attempt
+            await self.send_state_update({
+                "state": "blocked_attempt",
+                "attributes": {
+                    "url": url,
+                    "category": self._categorize_url(url),
+                    "timestamp": datetime.datetime.now().isoformat()
+                }
+            })
+            return True
+        return False
 
     async def _create_session(self) -> None:
         """Create aiohttp session with timeout."""
@@ -204,6 +318,12 @@ class BaseClient:
                 # Get current category
                 category = self.get_active_category()
 
+                # Check for blocked URLs
+                blocked_urls = set()
+                for url in self.browser_urls.values():
+                    if await self.handle_url_access(url):
+                        blocked_urls.add(url)
+
                 # Send state update
                 await self.send_state_update({
                     "state": category or "idle",
@@ -211,6 +331,7 @@ class BaseClient:
                         "windows": list(self.active_windows.values()),
                         "processes": list(self.active_processes),
                         "browser_urls": list(self.browser_urls.values()),
+                        "blocked_urls": list(blocked_urls),
                         "platform": platform.system(),
                         "memory_usage": self.get_memory_usage()
                     }
