@@ -2,6 +2,7 @@
 import asyncio
 import json
 import re
+from typing import List, Tuple, Dict, Any
 import pytest
 import aiohttp
 from unittest.mock import MagicMock, patch, AsyncMock, create_autospec
@@ -70,28 +71,74 @@ async def client(mock_config):
     if client.session:
         await client.session.close()
 
+class MockResponse:
+    """Mock aiohttp response."""
+    def __init__(self, status: int = 200, text: str = "OK"):
+        self.status = status
+        self._text = text
+    
+    async def text(self) -> str:
+        """Get response text."""
+        return self._text
+    
+    async def __aenter__(self):
+        """Enter async context."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        pass
+
+class PostContextManager:
+    """Context manager for post requests."""
+    def __init__(self, response: MockResponse):
+        self.response = response
+    
+    async def __aenter__(self):
+        """Enter async context."""
+        return self.response
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        pass
+
+class MockSession:
+    """Mock aiohttp session."""
+    def __init__(self):
+        self.closed = False
+        self._post_calls: List[Tuple[str, Dict[str, Any]]] = []
+        self._post_responses: List[MockResponse] = []
+        self.close = AsyncMock()
+    
+    def post(self, url: str, **kwargs) -> PostContextManager:
+        """Mock post request."""
+        self._post_calls.append((url, kwargs))
+        response = MockResponse()
+        self._post_responses.append(response)
+        return PostContextManager(response)
+    
+    @property
+    def post_call_count(self) -> int:
+        """Get number of post calls."""
+        return len(self._post_calls)
+    
+    @property
+    def post_call_args_list(self) -> List[MagicMock]:
+        """Get list of post call arguments."""
+        return [MagicMock(kwargs=call[1]) for call in self._post_calls]
+    
+    async def __aenter__(self):
+        """Enter async context."""
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Exit async context."""
+        await self.close()
+
 @pytest.fixture
 async def mock_aiohttp_session():
     """Create a mock aiohttp session."""
-    mock_response = AsyncMock()
-    mock_response.status = 200
-    mock_response.text = AsyncMock(return_value="OK")
-    
-    async def mock_aenter():
-        return mock_response
-    
-    async def mock_aexit(*args):
-        pass
-    
-    mock_response.__aenter__ = mock_aenter
-    mock_response.__aexit__ = mock_aexit
-    
-    mock_session = AsyncMock()
-    mock_session.post = AsyncMock(return_value=mock_response)
-    mock_session.closed = False
-    mock_session.close = AsyncMock()
-    
-    return mock_session
+    return MockSession()
 
 async def test_websocket_connection(client):
     """Test WebSocket connection."""
@@ -115,8 +162,8 @@ async def test_state_update(client, mock_aiohttp_session):
     test_state = {"state": "test", "attributes": {"test_attr": "value"}}
     await client.send_state_update(test_state)
     
-    assert mock_aiohttp_session.post.call_count > 0
-    call_args = mock_aiohttp_session.post.call_args
+    assert mock_aiohttp_session.post_call_count > 0
+    call_args = mock_aiohttp_session.post_call_args_list[0]
     assert call_args is not None
     assert call_args.kwargs["json"] == test_state
 
@@ -130,8 +177,10 @@ async def test_url_categorization(client):
     assert client._categorize_url("https://twitch.tv/stream") == "gaming"
     assert client._categorize_url("https://steam.com/game") == "gaming"
 
-async def test_url_blocking(client):
+async def test_url_blocking(client, mock_aiohttp_session):
     """Test URL blocking functionality."""
+    client.session = mock_aiohttp_session
+    
     assert await client.handle_url_access("https://youtube.com/gaming")
     assert await client.handle_url_access("https://facebook.com/test")
     assert await client.handle_url_access("https://youtube.com/watch?v=123&category=20")
@@ -161,10 +210,10 @@ async def test_update_loop(client, mock_aiohttp_session):
         pass
     
     # Verify state update was called
-    assert mock_aiohttp_session.post.call_count > 0
+    assert mock_aiohttp_session.post_call_count > 0
     
     # Verify blocked URLs were included in the update
-    calls = mock_aiohttp_session.post.call_args_list
+    calls = mock_aiohttp_session.post_call_args_list
     assert any(
         'blocked_urls' in str(call.kwargs.get('json', {}).get('attributes', {}))
         for call in calls
