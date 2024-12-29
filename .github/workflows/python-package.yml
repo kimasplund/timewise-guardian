@@ -3,37 +3,48 @@ name: Python Package
 on:
   push:
     branches: [ main ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ main ]
 
 jobs:
-  build:
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
+        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13-dev"]
+        exclude:
+          # Exclude unstable combinations
+          - os: windows-latest
+            python-version: "3.13-dev"
 
     steps:
     - uses: actions/checkout@v4
     
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+        allow-prereleases: true
         
     - name: Install Linux dependencies
       if: runner.os == 'Linux'
       run: |
         sudo apt-get update
-        sudo apt-get install -y wmctrl python3-dbus
+        sudo apt-get install -y wmctrl python3-dbus libnotify-bin
         
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install hatch pytest pytest-cov
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        python -m pip install hatch pytest pytest-cov pytest-asyncio
+        python -m pip install pyyaml aiohttp websockets psutil
+        # Install typing dependencies for older Python versions
+        if [ "${{ matrix.python-version }}" = "3.8" ]; then
+          python -m pip install typing-extensions
+        fi
+        python -m pip install -e .
       shell: bash
         
     - name: Build package
@@ -41,38 +52,88 @@ jobs:
         
     - name: Run tests
       run: |
-        python -m pytest tests/ --cov=timewise_guardian_client --cov-report=xml
+        python -m pytest tests/ --cov=src/timewise_guardian_client --cov-report=xml -v
         
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.xml
         flags: unittests
         name: codecov-umbrella
         fail_ci_if_error: true
-        
-    - name: Build Windows executable
-      if: runner.os == 'Windows'
-      run: |
-        pip install pyinstaller
-        pyinstaller --onefile --name timewise-guardian-client src/timewise_guardian_client/cli.py
-        
-    - name: Upload Windows artifact
-      if: runner.os == 'Windows'
-      uses: actions/upload-artifact@v3
+        token: ${{ secrets.CODECOV_TOKEN }}
+
+  build-artifacts:
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact_name: timewise-guardian-client-linux
+            executable_name: timewise-guardian-client
+          - os: windows-latest
+            artifact_name: timewise-guardian-client-windows
+            executable_name: timewise-guardian-client.exe
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
       with:
-        name: timewise-guardian-client-windows
-        path: dist/timewise-guardian-client.exe
+        python-version: "3.11"  # Use stable version for builds
         
-    - name: Build Linux package
-      if: runner.os == 'Linux'
+    - name: Install dependencies
       run: |
-        pip install pyinstaller
-        pyinstaller --onefile --name timewise-guardian-client src/timewise_guardian_client/cli.py
+        python -m pip install --upgrade pip
+        python -m pip install pyinstaller
+        python -m pip install -e .
+      
+    - name: Build executable
+      run: pyinstaller --onefile --name ${{ matrix.executable_name }} src/timewise_guardian_client/cli.py
         
-    - name: Upload Linux artifact
-      if: runner.os == 'Linux'
-      uses: actions/upload-artifact@v3
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
       with:
-        name: timewise-guardian-client-linux
-        path: dist/timewise-guardian-client 
+        name: ${{ matrix.artifact_name }}
+        path: dist/${{ matrix.executable_name }}
+
+  publish:
+    needs: [test, build-artifacts]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install hatch
+        
+    - name: Build package
+      run: python -m hatch build
+      
+    - name: Publish to PyPI
+      env:
+        HATCH_INDEX_USER: __token__
+        HATCH_INDEX_AUTH: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        python -m hatch publish
+        
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        generate_release_notes: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
