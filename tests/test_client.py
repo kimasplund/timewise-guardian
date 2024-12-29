@@ -1,6 +1,7 @@
 """Tests for the client module."""
 import asyncio
 import json
+import re
 import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from timewise_guardian_client.common.client import BaseClient
@@ -19,12 +20,12 @@ def mock_config():
         "categories": {
             "games": {
                 "processes": ["game.exe"],
-                "window_titles": ["Game Window"]
+                "window_titles": [re.compile("Game Window", re.IGNORECASE)]
             }
         }
     }
     config.get_category_processes.return_value = ["game.exe"]
-    config.get_category_window_titles.return_value = ["Game Window"]
+    config.get_category_window_titles.return_value = [re.compile("Game Window", re.IGNORECASE)]
     return config
 
 class TestClient(BaseClient):
@@ -37,6 +38,7 @@ class TestClient(BaseClient):
         self.active_processes = set()
         self.browser_urls = {}
         self.ws = None
+        self.session = None
     
     async def update_active_windows(self):
         """Mock implementation."""
@@ -74,6 +76,7 @@ async def test_websocket_connection(mock_config):
             json.dumps({"type": "auth_required"}),
             json.dumps({"type": "auth_ok"})
         ]
+        mock_ws.send = AsyncMock()
         return mock_ws
     
     with patch("websockets.connect", new=mock_connect):
@@ -84,16 +87,14 @@ async def test_websocket_connection(mock_config):
 async def test_state_update(mock_config):
     """Test state update functionality."""
     client = TestClient(mock_config)
+    client.session = AsyncMock()
+    mock_response = AsyncMock()
+    mock_response.status = 200
     
-    async def mock_post(*args, **kwargs):
-        return AsyncMock(status=200)
+    client.session.post.return_value.__aenter__.return_value = mock_response
     
-    mock_session = AsyncMock()
-    mock_session.post.return_value.__aenter__.return_value = AsyncMock(status=200)
-    
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        await client.send_state_update({"state": "test"})
-        assert mock_session.post.called
+    await client.send_state_update({"state": "test"})
+    assert client.session.post.called
 
 async def test_config_subscription(mock_config):
     """Test configuration subscription."""
@@ -105,6 +106,7 @@ async def test_config_subscription(mock_config):
             json.dumps({"type": "auth_required"}),
             json.dumps({"type": "auth_ok"})
         ]
+        mock_ws.send = AsyncMock()
         return mock_ws
     
     with patch("websockets.connect", new=mock_connect):

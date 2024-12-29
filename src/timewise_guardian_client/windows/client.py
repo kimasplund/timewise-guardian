@@ -6,7 +6,12 @@ import socket
 import win32gui
 import win32process
 import psutil
-from typing import Dict, Optional, Tuple
+import sqlite3
+from typing import Dict, Optional, Tuple, Set
+from pathlib import Path
+import os
+import glob
+import shutil
 
 from ..common.client import BaseClient
 from ..common.config import Config
@@ -41,10 +46,43 @@ def get_process_name(pid: int) -> Optional[str]:
 class WindowsClient(BaseClient):
     """Windows client implementation."""
 
+    BROWSER_PROCESSES = {
+        'chrome.exe': {
+            'history_path': r'AppData\Local\Google\Chrome\User Data\*\History',
+            'db_query': 'SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 5',
+            'profiles': ['Default', 'Profile *']
+        },
+        'firefox.exe': {
+            'history_path': r'AppData\Roaming\Mozilla\Firefox\Profiles\*.default*\places.sqlite',
+            'db_query': 'SELECT url FROM moz_places ORDER BY last_visit_date DESC LIMIT 5',
+            'profiles': None  # Firefox uses profile discovery
+        },
+        'msedge.exe': {
+            'history_path': r'AppData\Local\Microsoft\Edge\User Data\*\History',
+            'db_query': 'SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 5',
+            'profiles': ['Default', 'Profile *']
+        },
+        'brave.exe': {
+            'history_path': r'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\History',
+            'db_query': 'SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 5',
+            'profiles': ['Default', 'Profile *']
+        },
+        'opera.exe': {
+            'history_path': r'AppData\Roaming\Opera Software\Opera Stable\History',
+            'db_query': 'SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 5',
+            'profiles': ['Default']
+        },
+        'vivaldi.exe': {
+            'history_path': r'AppData\Local\Vivaldi\User Data\*\History',
+            'db_query': 'SELECT url FROM urls ORDER BY last_visit_time DESC LIMIT 5',
+            'profiles': ['Default', 'Profile *']
+        }
+    }
+
     def __init__(self, config: Config):
         """Initialize Windows client."""
         super().__init__(config)
-        self.browser_pids = set()
+        self.browser_pids: Set[int] = set()
         self.computer_id = self._generate_computer_id()
         self.computer_info = self._get_computer_info()
 
@@ -91,7 +129,7 @@ class WindowsClient(BaseClient):
             # Update browser PIDs
             self.browser_pids = {
                 pid for _, (_, pid) in windows.items()
-                if get_process_name(pid) in ['chrome.exe', 'firefox.exe', 'msedge.exe']
+                if get_process_name(pid) in self.BROWSER_PROCESSES.keys()
             }
             
         except Exception as e:
@@ -107,12 +145,97 @@ class WindowsClient(BaseClient):
         except Exception as e:
             logger.error("Error updating active processes: %s", str(e))
 
+    def _get_browser_history(self, process_name: str, username: str) -> Set[str]:
+        """Get browser history for a specific browser."""
+        urls = set()
+        browser_info = self.BROWSER_PROCESSES.get(process_name)
+        if not browser_info:
+            return urls
+
+        try:
+            base_path = os.path.expanduser(f'~{username}')
+            
+            # Handle profile-based browsers
+            if browser_info['profiles']:
+                for profile in browser_info['profiles']:
+                    # Replace * with actual profile pattern
+                    profile_path = browser_info['history_path'].replace('*', profile)
+                    full_path = os.path.join(base_path, profile_path)
+                    
+                    # Handle wildcards in profile names
+                    if '*' in full_path:
+                        matching_paths = glob.glob(full_path)
+                        for history_path in matching_paths:
+                            urls.update(self._read_history_db(history_path, browser_info['db_query']))
+                    else:
+                        urls.update(self._read_history_db(full_path, browser_info['db_query']))
+            else:
+                # Handle Firefox-style profile discovery
+                full_path = os.path.join(base_path, browser_info['history_path'])
+                matching_paths = glob.glob(full_path)
+                for history_path in matching_paths:
+                    urls.update(self._read_history_db(history_path, browser_info['db_query']))
+
+        except Exception as e:
+            logger.error("Error reading browser history for %s: %s", process_name, str(e))
+
+        return urls
+
+    def _read_history_db(self, history_path: str, query: str) -> Set[str]:
+        """Read URLs from a browser history database."""
+        urls = set()
+        if not os.path.exists(history_path):
+            return urls
+
+        # Create a copy of the database file to avoid lock issues
+        temp_db = f"{history_path}.tmp"
+        try:
+            # Wait for file to be unlocked
+            max_retries = 3
+            retry_count = 0
+            while retry_count < max_retries:
+                try:
+                    shutil.copy2(history_path, temp_db)
+                    break
+                except (PermissionError, FileNotFoundError):
+                    retry_count += 1
+                    if retry_count == max_retries:
+                        return urls
+                    asyncio.sleep(1)  # Wait a second before retrying
+
+            try:
+                with sqlite3.connect(temp_db) as conn:
+                    conn.row_factory = sqlite3.Row  # Enable column access by name
+                    cursor = conn.cursor()
+                    cursor.execute(query)
+                    urls.update(row[0] for row in cursor.fetchall())
+            finally:
+                try:
+                    os.remove(temp_db)
+                except OSError:
+                    pass
+
+        except Exception as e:
+            logger.error("Error reading history database %s: %s", history_path, str(e))
+
+        return urls
+
     async def update_browser_activity(self) -> None:
         """Update browser activity."""
-        # This is a placeholder. In a real implementation, you would:
-        # 1. Use browser extensions or native messaging to get active URLs
-        # 2. Monitor browser history files
-        # 3. Use browser automation tools
-        # For now, we just log the browser PIDs
-        if self.browser_pids:
-            logger.debug("Active browser PIDs: %s", self.browser_pids) 
+        self.browser_urls.clear()
+        
+        for pid in self.browser_pids:
+            try:
+                process = psutil.Process(pid)
+                process_name = process.name()
+                username = process.username().split('\\')[-1]  # Remove domain prefix
+                
+                if process_name in self.BROWSER_PROCESSES:
+                    urls = self._get_browser_history(process_name, username)
+                    for url in urls:
+                        self.browser_urls[f"{process_name}_{pid}"] = url
+                        
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            except Exception as e:
+                logger.error("Error updating browser activity: %s", str(e)) 

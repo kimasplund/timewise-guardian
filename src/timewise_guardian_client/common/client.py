@@ -1,11 +1,14 @@
 """Base client class for Timewise Guardian."""
 import asyncio
+import json
 import logging
 import platform
 from typing import Dict, List, Optional, Set, Any
 import aiohttp
 import websockets
 import psutil
+from aiohttp import ClientTimeout
+from websockets.exceptions import WebSocketException
 
 from .config import Config
 
@@ -24,6 +27,14 @@ class BaseClient:
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.session: Optional[aiohttp.ClientSession] = None
         self._message_id = 0
+        self._reconnect_attempts = 0
+        self._max_reconnect_delay = 300  # 5 minutes
+
+    async def _create_session(self) -> None:
+        """Create aiohttp session with timeout."""
+        if self.session is None or self.session.closed:
+            timeout = ClientTimeout(total=30)  # 30 seconds timeout
+            self.session = aiohttp.ClientSession(timeout=timeout)
 
     async def connect_websocket(self) -> None:
         """Connect to Home Assistant WebSocket API."""
@@ -31,16 +42,20 @@ class BaseClient:
         
         try:
             self.ws = await websockets.connect(url)
-            auth_msg = await self.ws.recv()
-            await self.ws.send({
+            auth_msg = json.loads(await self.ws.recv())
+            
+            if auth_msg["type"] != "auth_required":
+                raise Exception("Unexpected initial message")
+                
+            await self.ws.send(json.dumps({
                 "type": "auth",
                 "access_token": self.config.ha_token
-            })
-            auth_result = await self.ws.recv()
+            }))
             
+            auth_result = json.loads(await self.ws.recv())
             if auth_result.get("type") == "auth_ok":
                 logger.info("Connected to Home Assistant WebSocket API")
-                # Subscribe to config updates
+                self._reconnect_attempts = 0  # Reset counter on successful connection
                 await self.subscribe_to_config()
             else:
                 raise Exception("Authentication failed")
@@ -79,29 +94,48 @@ class BaseClient:
 
         try:
             while self.running:
-                message = await self.ws.recv()
-                if message.get("type") == "trigger":
-                    # Config update received
-                    new_state = message["event"]["data"]["new_state"]
-                    if new_state["entity_id"] == "twg.config":
-                        self.config.update_ha_settings(new_state["attributes"])
-                elif message.get("type") == "result":
-                    # Initial state received
-                    if "result" in message:
-                        for state in message["result"]:
-                            if state["entity_id"] == "twg.config":
-                                self.config.update_ha_settings(state["attributes"])
+                try:
+                    message = json.loads(await self.ws.recv())
+                    if message.get("type") == "trigger":
+                        # Config update received
+                        new_state = message["event"]["data"]["new_state"]
+                        if new_state["entity_id"] == "twg.config":
+                            self.config.update_ha_settings(new_state["attributes"])
+                    elif message.get("type") == "result":
+                        # Initial state received
+                        if "result" in message:
+                            for state in message["result"]:
+                                if state["entity_id"] == "twg.config":
+                                    self.config.update_ha_settings(state["attributes"])
+                except websockets.exceptions.ConnectionClosed:
+                    logger.warning("WebSocket connection closed")
+                    if self.running:
+                        await self.reconnect()
+                        break
+                except json.JSONDecodeError as e:
+                    logger.error("Invalid JSON message received: %s", str(e))
+                    continue
+                
         except Exception as e:
             logger.error("Error handling WebSocket messages: %s", str(e))
             if self.running:
                 await self.reconnect()
 
     async def reconnect(self) -> None:
-        """Reconnect to WebSocket API."""
+        """Reconnect to WebSocket API with exponential backoff."""
         try:
             await self.disconnect_websocket()
-            await asyncio.sleep(5)  # Wait before reconnecting
+            
+            # Calculate delay with exponential backoff
+            delay = min(2 ** self._reconnect_attempts, self._max_reconnect_delay)
+            self._reconnect_attempts += 1
+            
+            logger.info("Attempting reconnection in %d seconds (attempt %d)", 
+                       delay, self._reconnect_attempts)
+            await asyncio.sleep(delay)
+            
             await self.connect_websocket()
+            
         except Exception as e:
             logger.error("Reconnection failed: %s", str(e))
 
@@ -113,8 +147,7 @@ class BaseClient:
 
     async def send_state_update(self, data: dict) -> None:
         """Send state update to Home Assistant."""
-        if not self.session:
-            self.session = aiohttp.ClientSession()
+        await self._create_session()
 
         headers = {
             "Authorization": f"Bearer {self.config.ha_token}",
@@ -129,6 +162,8 @@ class BaseClient:
             ) as response:
                 if response.status != 200:
                     logger.error("Failed to update state: %s", await response.text())
+        except asyncio.TimeoutError:
+            logger.error("Timeout while sending state update")
         except Exception as e:
             logger.error("Error sending state update: %s", str(e))
 
@@ -208,12 +243,23 @@ class BaseClient:
         """Update browser activity. To be implemented by platform-specific classes."""
         raise NotImplementedError
 
+    async def cleanup(self) -> None:
+        """Clean up resources."""
+        self.running = False
+        if self.session and not self.session.closed:
+            await self.session.close()
+        if self.ws:
+            await self.disconnect_websocket()
+
     def run(self) -> None:
         """Run the client."""
         self.running = True
         loop = asyncio.get_event_loop()
         
         try:
+            # Create session
+            loop.run_until_complete(self._create_session())
+            # Connect WebSocket
             loop.run_until_complete(self.connect_websocket())
             # Start WebSocket message handler
             loop.create_task(self.handle_websocket_messages())
@@ -222,10 +268,7 @@ class BaseClient:
         except KeyboardInterrupt:
             logger.info("Shutting down...")
         finally:
-            self.running = False
-            if self.session:
-                loop.run_until_complete(self.session.close())
-            loop.run_until_complete(self.disconnect_websocket())
+            loop.run_until_complete(self.cleanup())
             loop.close()
 
     def stop(self) -> None:
