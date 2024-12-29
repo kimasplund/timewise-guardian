@@ -6,6 +6,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 
 from .const import DOMAIN
 from .models import TWGStore
@@ -38,6 +39,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Set up websocket API
     await async_setup_websocket_api(hass)
+
+    # Register device registry handler
+    async def register_computer(computer_info: dict) -> None:
+        """Register a computer as a device in Home Assistant."""
+        device_registry = dr.async_get(hass)
+        device_registry.async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={(DOMAIN, computer_info["id"])},
+            name=computer_info["name"],
+            manufacturer="Timewise Guardian",
+            model=computer_info.get("os", "Unknown"),
+            sw_version=computer_info.get("version", "Unknown"),
+        )
+
+    # Store the registration function for use by the websocket API
+    hass.data[DOMAIN][entry.entry_id]["register_computer"] = register_computer
 
     # Set up platforms
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

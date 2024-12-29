@@ -2,6 +2,8 @@
 param(
     [string]$HAUrl = "http://homeassistant.local:8123",
     [string]$HAToken = "",
+    [int]$MaxMemoryMB = 100,
+    [int]$CleanupIntervalMinutes = 5,
     [switch]$Force = $false,
     [switch]$Debug = $false
 )
@@ -31,6 +33,12 @@ try {
     $programDir = "$env:ProgramData\TimeWiseGuardian"
     if (-not (Test-Path $programDir)) {
         New-Item -ItemType Directory -Path $programDir | Out-Null
+    }
+
+    # Create logs directory
+    $logDir = "$programDir\logs"
+    if (-not (Test-Path $logDir)) {
+        New-Item -ItemType Directory -Path $logDir | Out-Null
     }
 
     # Install Python if not present
@@ -84,13 +92,45 @@ notifications:
   warning_intervals: [30, 15, 10, 5, 1]
   popup_duration: 10
   sound_enabled: true
+
+memory_management:
+  max_client_memory_mb: $MaxMemoryMB
+  cleanup_interval_minutes: $CleanupIntervalMinutes
+  memory_threshold: 90
+  debug_memory: $($Debug.ToString().ToLower())
 "@
         Set-Content -Path $configPath -Value $config
     }
 
+    # Create service configuration
+    $serviceConfig = @{
+        Name = "TimeWiseGuardian"
+        DisplayName = "TimeWise Guardian"
+        Description = "Monitors computer usage and enforces time limits"
+        BinaryPathName = "$(Get-Command python).Path -m twg.service"
+        StartupType = "Automatic"
+        DependsOn = @("LanmanServer")
+    }
+
     # Install and start the service
     Write-Log "Installing Windows service..."
-    python -m twg.service install
+    if (Get-Service TimeWiseGuardian -ErrorAction SilentlyContinue) {
+        Write-Log "Stopping existing service..."
+        Stop-Service TimeWiseGuardian
+        Write-Log "Removing existing service..."
+        sc.exe delete TimeWiseGuardian
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Log "Creating new service..."
+    New-Service @serviceConfig
+
+    # Set recovery options
+    Write-Log "Configuring service recovery options..."
+    sc.exe failure TimeWiseGuardian reset= 86400 actions= restart/60000/restart/60000/restart/60000
+
+    # Start service
+    Write-Log "Starting service..."
     Start-Service TimeWiseGuardian
 
     # Enable debug logging if requested
@@ -102,7 +142,12 @@ notifications:
     }
 
     Write-Log "Installation completed successfully!"
-    Write-Host "`nTimeWise Guardian has been installed and started.`nConfiguration file: $configPath`nLogs directory: $programDir\logs"
+    Write-Host "`nTimeWise Guardian has been installed and started."
+    Write-Host "Configuration file: $configPath"
+    Write-Host "Logs directory: $logDir"
+    Write-Host "Service status: $((Get-Service TimeWiseGuardian).Status)"
+    Write-Host "Memory limit: $MaxMemoryMB MB"
+    Write-Host "Cleanup interval: $CleanupIntervalMinutes minutes"
 
 } catch {
     Write-Log "Installation failed: $_"

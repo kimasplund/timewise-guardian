@@ -1,7 +1,8 @@
 ---
 # Home Assistant connection settings
-ha_url: "http://homeassistant.local:8123"
-ha_token: "your_long_lived_access_token"
+homeassistant:
+  url: "http://192.168.2.20:8123"
+  token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiI2YjE4MjYxYWQxYTA0YWM3OTgwYmM2ZGEyZTE3MjZkZSIsImlhdCI6MTczNTQxODA2OSwiZXhwIjoyMDUwNzc4MDY5fQ.Qg1LD20T6dSTh0b1kl7Uz74uFyGuU_unC3IBErL-mKQ"
 
 # User mapping
 user_mapping:

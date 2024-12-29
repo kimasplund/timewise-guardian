@@ -3,8 +3,10 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
-from typing import Any, Dict, Optional
+import weakref
+from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, List
+from collections import deque
 
 import psutil
 import requests
@@ -25,9 +27,18 @@ class WindowsMonitor:
         self.current_user = None
         self.current_window = None
         self.current_process = None
-        self.browser_history = {}
+        # Use deque with maxlen for fixed-size circular buffers
+        self.memory_history = deque(maxlen=86400)  # 24 hours of history
+        self.memory_threshold = 90  # Alert when RAM usage is above 90%
+        # Use weak references for browser history to allow garbage collection
+        self.browser_history = weakref.WeakValueDictionary()
+        # Use fixed-size dict for category times
         self.category_times = {}
         self._setup_logging()
+        # Track our own memory usage
+        self.last_cleanup = datetime.now()
+        self.cleanup_interval = timedelta(minutes=5)
+        self.max_client_memory_mb = 100  # Maximum memory for the client itself
 
     def _setup_logging(self) -> None:
         """Set up logging."""
@@ -128,23 +139,205 @@ class WindowsMonitor:
                     }
         return warnings
 
+    def _cleanup(self) -> None:
+        """Perform memory cleanup if needed."""
+        try:
+            current_process = psutil.Process(os.getpid())
+            memory_mb = current_process.memory_info().rss / (1024 * 1024)
+
+            if memory_mb > self.max_client_memory_mb or datetime.now() - self.last_cleanup > self.cleanup_interval:
+                # Clear any unnecessary caches
+                self.browser_history.clear()
+                
+                # Force garbage collection
+                import gc
+                gc.collect()
+
+                # Log memory usage
+                new_memory_mb = current_process.memory_info().rss / (1024 * 1024)
+                _LOGGER.debug(
+                    "Memory cleanup performed. Usage before: %.2f MB, after: %.2f MB",
+                    memory_mb, new_memory_mb
+                )
+                
+                self.last_cleanup = datetime.now()
+
+        except Exception as e:
+            _LOGGER.error("Failed to perform memory cleanup: %s", e)
+
+    def get_memory_info(self) -> Dict[str, Any]:
+        """Get detailed memory information."""
+        try:
+            # Check and cleanup our own memory usage first
+            self._cleanup()
+
+            memory = psutil.virtual_memory()
+            swap = psutil.swap_memory()
+            
+            # Get per-process memory usage more efficiently
+            process_memory = []
+            for proc in psutil.process_iter(['name', 'memory_percent']):
+                try:
+                    # Only get detailed memory info for significant processes (using > 0.1% memory)
+                    if proc.info['memory_percent'] > 0.1:
+                        process_memory.append({
+                            'name': proc.info['name'],
+                            'memory_percent': proc.info['memory_percent'],
+                            'memory_mb': proc.memory_info().rss / (1024 * 1024)
+                        })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            # Sort and limit top processes efficiently
+            process_memory.sort(key=lambda x: x['memory_percent'], reverse=True)
+            top_processes = process_memory[:10]
+
+            memory_info = {
+                'total': memory.total / (1024 * 1024 * 1024),  # GB
+                'available': memory.available / (1024 * 1024 * 1024),  # GB
+                'used': memory.used / (1024 * 1024 * 1024),  # GB
+                'percent': memory.percent,
+                'swap_total': swap.total / (1024 * 1024 * 1024),  # GB
+                'swap_used': swap.used / (1024 * 1024 * 1024),  # GB
+                'swap_percent': swap.percent,
+                'top_processes': top_processes,
+                'timestamp': datetime.now().isoformat(),
+                'client_memory_mb': psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
+            }
+
+            # Store historical data efficiently using deque
+            self.memory_history.append({
+                'timestamp': memory_info['timestamp'],
+                'percent': memory_info['percent'],
+                'swap_percent': memory_info['swap_percent']
+            })
+
+            # Check for memory alerts
+            if memory_info['percent'] > self.memory_threshold:
+                self._handle_memory_alert(memory_info)
+
+            return memory_info
+
+        except Exception as e:
+            _LOGGER.error("Failed to get memory info: %s", e)
+            return {}
+
+    def _handle_memory_alert(self, memory_info: Dict[str, Any]) -> None:
+        """Handle high memory usage alerts."""
+        try:
+            alert_data = {
+                'type': 'memory_alert',
+                'severity': 'warning' if memory_info['percent'] < 95 else 'critical',
+                'message': f"High memory usage: {memory_info['percent']:.1f}%",
+                'details': {
+                    'available_gb': memory_info['available'],
+                    'top_processes': memory_info['top_processes'][:5]  # Top 5 memory consumers
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+
+            # Send alert to Home Assistant
+            self.send_alert(alert_data)
+
+            # Log the alert
+            _LOGGER.warning("Memory alert: %s", alert_data['message'])
+
+        except Exception as e:
+            _LOGGER.error("Failed to handle memory alert: %s", e)
+
+    def send_alert(self, alert_data: Dict[str, Any]) -> None:
+        """Send alert to Home Assistant."""
+        try:
+            response = requests.post(
+                f"{self.config['ha_url']}/api/twg/alert",
+                json=alert_data,
+                headers={"Authorization": f"Bearer {self.config['ha_token']}"},
+            )
+            response.raise_for_status()
+        except Exception as e:
+            _LOGGER.error("Failed to send alert: %s", e)
+
+    def get_memory_trends(self) -> Dict[str, Any]:
+        """Calculate memory usage trends efficiently."""
+        try:
+            if not self.memory_history:
+                return {}
+
+            # Convert deque to list only for the needed samples
+            hour_samples = min(3600, len(self.memory_history))
+            last_hour = list(self.memory_history)[-hour_samples:]
+            
+            # Calculate statistics in a single pass
+            hour_stats = {
+                'sum': 0,
+                'max': float('-inf'),
+                'min': float('inf'),
+                'swap_sum': 0,
+                'swap_max': float('-inf')
+            }
+
+            for sample in last_hour:
+                percent = sample['percent']
+                swap_percent = sample['swap_percent']
+                
+                hour_stats['sum'] += percent
+                hour_stats['max'] = max(hour_stats['max'], percent)
+                hour_stats['min'] = min(hour_stats['min'], percent)
+                hour_stats['swap_sum'] += swap_percent
+                hour_stats['swap_max'] = max(hour_stats['swap_max'], swap_percent)
+
+            hour_avg = hour_stats['sum'] / len(last_hour)
+            swap_avg = hour_stats['swap_sum'] / len(last_hour)
+
+            # Determine trend by comparing with the oldest sample
+            trend = 'increasing' if hour_avg > last_hour[0]['percent'] else 'decreasing'
+
+            return {
+                'last_hour': {
+                    'average': hour_avg,
+                    'maximum': hour_stats['max'],
+                    'minimum': hour_stats['min'],
+                    'trend': trend
+                },
+                'swap_usage': {
+                    'average': swap_avg,
+                    'maximum': hour_stats['swap_max']
+                }
+            }
+
+        except Exception as e:
+            _LOGGER.error("Failed to calculate memory trends: %s", e)
+            return {}
+
     def send_state_update(self) -> None:
         """Send state update to Home Assistant."""
         try:
+            # Get memory info and trends efficiently
+            memory_info = self.get_memory_info()
+            memory_trends = self.get_memory_trends()
+            
+            # Create update data with minimal memory allocation
             data = {
                 "user": self.current_user,
                 "window": self.current_window,
                 "process": self.current_process,
                 "category_times": self.category_times,
+                "memory_info": memory_info,
+                "memory_trends": memory_trends,
                 "timestamp": datetime.now().isoformat(),
             }
             
+            # Send update
             response = requests.post(
                 f"{self.config['ha_url']}/api/twg/update",
                 json=data,
                 headers={"Authorization": f"Bearer {self.config['ha_token']}"},
             )
             response.raise_for_status()
+
+            # Cleanup after sending update
+            self._cleanup()
+
         except Exception as e:
             _LOGGER.error("Failed to send state update: %s", e)
 

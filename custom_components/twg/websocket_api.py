@@ -24,6 +24,36 @@ async def async_setup_websocket_api(hass: HomeAssistant) -> None:
     """Set up WebSocket API."""
     
     @websocket_command({
+        vol.Required('type'): 'twg/register_computer',
+        vol.Required('computer_info'): {
+            vol.Required('id'): str,
+            vol.Required('name'): str,
+            vol.Required('os'): str,
+            vol.Optional('version'): str,
+        },
+    })
+    async def websocket_register_computer(
+        hass: HomeAssistant,
+        connection: ActiveConnection,
+        msg: Dict[str, Any]
+    ) -> None:
+        """Register a computer with Timewise Guardian."""
+        try:
+            entry_id = connection.context.get("entry_id")
+            if not entry_id or entry_id not in hass.data[DOMAIN]:
+                raise ValueError("Invalid entry_id")
+
+            register_computer = hass.data[DOMAIN][entry_id]["register_computer"]
+            await register_computer(msg["computer_info"])
+            
+            connection.send_result(msg["id"], {
+                "success": True,
+                "computer_id": msg["computer_info"]["id"]
+            })
+        except Exception as err:
+            connection.send_error(msg["id"], "registration_failed", str(err))
+
+    @websocket_command({
         vol.Required('type'): 'twg/get_roles',
     })
     @require_admin
@@ -170,6 +200,7 @@ async def async_setup_websocket_api(hass: HomeAssistant) -> None:
 
     # Register all commands
     for cmd in [
+        websocket_register_computer,
         websocket_get_roles,
         websocket_create_role,
         websocket_update_role,
