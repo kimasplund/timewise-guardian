@@ -14,7 +14,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, windows-latest]
-        python-version: ["3.8", "3.9", "3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12"]
         include:
           # Add Python 3.13 only for Ubuntu 24.04
           - os: ubuntu-24.04
@@ -44,10 +44,6 @@ jobs:
         python -m pip install --upgrade pip
         python -m pip install hatch pytest pytest-cov pytest-asyncio
         python -m pip install pyyaml aiohttp websockets psutil
-        # Install typing dependencies for older Python versions
-        if [ "${{ matrix.python-version }}" = "3.8" ]; then
-          python -m pip install typing-extensions
-        fi
         python -m pip install -e .
       shell: bash
         

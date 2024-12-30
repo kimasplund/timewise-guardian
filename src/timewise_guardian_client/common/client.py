@@ -8,8 +8,8 @@ from .blocklists import BlocklistManager
 
 logger = logging.getLogger(__name__)
 
-class BaseClient:
-    """Base client implementation."""
+class TWGClient:
+    """Timewise Guardian client implementation."""
     
     def __init__(self, config):
         """Initialize the client."""
