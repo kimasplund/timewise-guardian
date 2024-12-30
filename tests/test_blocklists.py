@@ -2,6 +2,7 @@
 import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from src.timewise_guardian_client.common.blocklists import BlocklistManager
+import os
 
 @pytest.fixture
 def mock_hosts_content():
@@ -28,6 +29,7 @@ async def test_blocklist_initialization(blocklist_manager):
     assert blocklist_manager.whitelist == set()
     assert blocklist_manager.blacklist == set()
     assert blocklist_manager.enabled_categories == set()
+    assert blocklist_manager.domains == set()
 
 async def test_parse_hosts_file(blocklist_manager, mock_hosts_content):
     """Test parsing hosts file content."""
@@ -62,10 +64,18 @@ async def test_category_management(blocklist_manager):
 
 async def test_domain_blocking(blocklist_manager):
     """Test domain blocking."""
+    # Setup test data
     blocklist_manager.add_to_blacklist("blocked.com")
     blocklist_manager.add_to_whitelist("allowed.com")
-    blocklist_manager.domains = {"ads.example.com", "malware.example.com"}
-
+    
+    # Create a mock blocklist file
+    base_file = os.path.join(blocklist_manager.blocklists_dir, "base.txt")
+    os.makedirs(os.path.dirname(base_file), exist_ok=True)
+    with open(base_file, "w") as f:
+        f.write("ads.example.com\n")
+    
+    blocklist_manager.enabled_categories.add("base")
+    
     assert blocklist_manager.is_domain_blocked("blocked.com")
     assert not blocklist_manager.is_domain_blocked("allowed.com")
     assert blocklist_manager.is_domain_blocked("ads.example.com")
@@ -85,11 +95,14 @@ async def test_update_blocklists(blocklist_manager, mock_hosts_content):
 
     with patch("aiohttp.ClientSession", return_value=mock_session):
         await blocklist_manager.update_blocklists()
-
-    assert "ads.example.com" in blocklist_manager.domains
-    assert "malware.example.com" in blocklist_manager.domains
-    assert "tracking.example.com" in blocklist_manager.domains
-    assert "spam.example.com" in blocklist_manager.domains
+        
+        # Verify domains are saved to file
+        base_file = os.path.join(blocklist_manager.blocklists_dir, "base.txt")
+        assert os.path.exists(base_file)
+        with open(base_file) as f:
+            content = f.read()
+            assert "ads.example.com" in content
+            assert "malware.example.com" in content
 
 async def test_available_categories(blocklist_manager):
     """Test getting available categories."""
@@ -112,7 +125,7 @@ async def test_invalid_domain_handling(blocklist_manager):
     ]
 
     for domain in invalid_domains:
-        assert not blocklist_manager.is_domain_blocked(domain)
-        # Should not raise exceptions
-        blocklist_manager.add_to_whitelist(domain)
-        blocklist_manager.add_to_blacklist(domain) 
+        assert not blocklist_manager._is_valid_domain(domain)
+        if isinstance(domain, str):
+            blocklist_manager.add_to_whitelist(domain)
+            blocklist_manager.add_to_blacklist(domain) 

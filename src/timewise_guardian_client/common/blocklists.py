@@ -38,6 +38,7 @@ class BlocklistManager:
         self.whitelist: Set[str] = set()
         self.blacklist: Set[str] = set()
         self.blocked_domains: Set[str] = set()
+        self.domains: Set[str] = set()
         
         # Load configuration
         self.load_config()
@@ -97,6 +98,7 @@ class BlocklistManager:
                 if response.status == 200:
                     content = await response.text()
                     domains = self._parse_hosts_file(content)
+                    self.domains.update(domains)
                     
                     # Save to file
                     output_path = os.path.join(self.blocklists_dir, f"{list_type}.txt")
@@ -125,6 +127,8 @@ class BlocklistManager:
     
     def _is_valid_domain(self, domain: str) -> bool:
         """Check if a domain is valid."""
+        if not domain or not isinstance(domain, str):
+            return False
         if domain in self.whitelist:
             return False
         if domain in self.blacklist:
