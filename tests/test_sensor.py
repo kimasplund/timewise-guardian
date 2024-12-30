@@ -33,6 +33,8 @@ def mock_coordinator(mock_hass):
     coordinator.async_request_refresh = AsyncMock()
     coordinator.get_active_users = Mock(return_value={})
     coordinator.async_get_active_users = AsyncMock(return_value={})
+    coordinator.get_user_config = Mock(return_value={})
+    coordinator.get_available_categories = Mock(return_value={})
     return coordinator
 
 @pytest.fixture
@@ -79,6 +81,7 @@ async def test_user_sensor(mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
 
     sensor = TWGUserSensor(mock_coordinator, user_id)
     assert sensor.unique_id == f"twg_{user_id}_status"
@@ -99,6 +102,7 @@ async def test_activity_sensor(mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
 
     sensor = TWGActivitySensor(mock_coordinator, user_id)
     assert sensor.unique_id == f"twg_{user_id}_activity"
@@ -119,6 +123,7 @@ async def test_time_limit_sensor(mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
 
     sensor = TWGTimeLimitSensor(mock_coordinator, user_id)
     assert sensor.unique_id == f"twg_{user_id}_time_limit"
@@ -139,6 +144,8 @@ async def test_blocked_domains_sensor(mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
+    mock_coordinator.get_available_categories.return_value = {"social": "Social Media"}
 
     sensor = TWGBlockedDomainsSensor(mock_coordinator, user_id)
     assert sensor.unique_id == f"twg_{user_id}_blocked"
@@ -150,11 +157,16 @@ async def test_sensor_unavailable(mock_coordinator, user_data):
     """Test sensor availability."""
     user_id = user_data["user_id"]
     mock_coordinator.data = {
-        "users": {},
-        "states": {}
+        "users": {
+            user_id: None
+        },
+        "states": {
+            user_id: None
+        }
     }
     mock_coordinator.get_active_users.return_value = {}
     mock_coordinator.async_get_active_users.return_value = {}
+    mock_coordinator.get_user_config.return_value = None
 
     sensor = TWGUserSensor(mock_coordinator, user_id)
     assert not sensor.available
@@ -172,6 +184,7 @@ async def test_dynamic_entity_creation(mock_hass, mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
 
     # Create sensors
     sensors = [
@@ -184,9 +197,9 @@ async def test_dynamic_entity_creation(mock_hass, mock_coordinator, user_data):
     # Add entities to hass
     for sensor in sensors:
         await sensor.async_added_to_hass()
+        await sensor.async_update()  # Force an update to trigger state changes
 
     # Verify entities were created
-    mock_hass.states.async_set.assert_called()
     assert mock_hass.states.async_set.call_count == len(sensors)
 
 async def test_sensor_update_on_coordinator_update(mock_coordinator, user_data):
@@ -202,6 +215,7 @@ async def test_sensor_update_on_coordinator_update(mock_coordinator, user_data):
     }
     mock_coordinator.get_active_users.return_value = {user_id: user_data["info"]}
     mock_coordinator.async_get_active_users.return_value = {user_id: user_data["info"]}
+    mock_coordinator.get_user_config.return_value = user_data["info"]
 
     sensor = TWGUserSensor(mock_coordinator, user_id)
     assert sensor.native_value == "active"

@@ -31,16 +31,16 @@ class TWGConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @callback
     def async_get_options_flow(config_entry):
         """Get the options flow for this handler."""
-        return TWGOptionsFlow(config_entry)
+        return OptionsFlowHandler(config_entry)
 
 
-class TWGOptionsFlow(config_entries.OptionsFlow):
+class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle TWG options."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        super().__init__(config_entry)
-        self._config = dict(config_entry.options)
+        self.config_entry = config_entry
+        self.options = dict(config_entry.options)
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
@@ -52,7 +52,7 @@ class TWGOptionsFlow(config_entries.OptionsFlow):
             data_schema=vol.Schema({
                 vol.Optional(
                     CONF_USERS,
-                    default=self._config.get(CONF_USERS, {})
+                    default=self.options.get(CONF_USERS, {})
                 ): {
                     str: {
                         vol.Optional(CONF_BLOCKLIST_CATEGORIES): [str],
@@ -67,8 +67,8 @@ class TWGOptionsFlow(config_entries.OptionsFlow):
         """Get available categories from coordinator."""
         coordinator = self.hass.data[DOMAIN].get("coordinator")
         if coordinator:
-            self._categories = await coordinator.async_get_categories()
-        return self._categories or {}
+            return await coordinator.async_get_categories()
+        return {}
 
     async def _get_active_users(self):
         """Get list of active computer users."""

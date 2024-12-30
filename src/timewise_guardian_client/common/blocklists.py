@@ -100,6 +100,9 @@ class BlocklistManager:
                     domains = self._parse_hosts_file(content)
                     self.domains.update(domains)
                     
+                    # Ensure directory exists
+                    os.makedirs(self.blocklists_dir, exist_ok=True)
+                    
                     # Save to file
                     output_path = os.path.join(self.blocklists_dir, f"{list_type}.txt")
                     with open(output_path, "w") as f:
@@ -133,6 +136,13 @@ class BlocklistManager:
             return False
         if domain in self.blacklist:
             return True
+            
+        # Check for invalid characters and patterns
+        if "-" in domain:
+            parts = domain.split(".")
+            if any(part.startswith("-") or part.endswith("-") for part in parts):
+                return False
+                
         return bool(re.match(r"^[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}$", domain))
     
     def update_enabled_categories(self, categories: List[str]) -> None:
