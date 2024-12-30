@@ -9,6 +9,10 @@ CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_API_KEY = "api_key"
 CONF_SCAN_INTERVAL = "scan_interval"
+CONF_USERS = "users"
+CONF_BLOCKLIST_CATEGORIES = "blocklist_categories"
+CONF_WHITELIST = "whitelist"
+CONF_BLACKLIST = "blacklist"
 
 # Defaults
 DEFAULT_HOST = "localhost"
@@ -24,6 +28,8 @@ SERVICE_REMOVE_CATEGORY = "remove_category"
 
 # Event types
 EVENT_USER_ACTIVITY = "twg_user_activity"
+EVENT_USER_DETECTED = "twg_user_detected"
+EVENT_CATEGORIES_UPDATED = "twg_categories_updated"
 EVENT_TIME_LIMIT_WARNING = "twg_time_limit_warning"
 EVENT_TIME_LIMIT_REACHED = "twg_time_limit_reached"
 EVENT_RESTRICTION_ACTIVE = "twg_restriction_active"

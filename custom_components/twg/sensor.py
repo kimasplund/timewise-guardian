@@ -1,24 +1,20 @@
-"""Platform for sensor integration."""
+"""Sensor platform for Timewise Guardian."""
 from __future__ import annotations
 
-from datetime import datetime
 import logging
-from typing import Any
+from typing import Any, Optional
 
-from homeassistant.components.sensor import (
-    SensorDeviceClass,
-    SensorEntity,
-    SensorStateClass,
-)
+from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.typing import StateType
+from homeassistant.helpers.update_coordinator import (
+    CoordinatorEntity,
+    DataUpdateCoordinator,
+)
 
-from . import DOMAIN
-from .models import TWGStore
+from .const import DOMAIN, NAME, VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -28,127 +24,181 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Timewise Guardian sensors."""
-    name = config_entry.data[CONF_NAME]
-    store = TWGStore(hass, config_entry.entry_id)
-    await store.async_load()
+    coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
 
-    async_add_entities(
-        [
-            TWGUserSensor(name, config_entry.entry_id, store),
-            TWGActivitySensor(name, config_entry.entry_id, store),
-            TWGTimeLimitSensor(name, config_entry.entry_id, store),
+    # Create entities for existing users
+    entities = []
+    for user_id, user_info in coordinator.get_active_users().items():
+        entities.extend([
+            TWGUserSensor(coordinator, user_id),
+            TWGActivitySensor(coordinator, user_id),
+            TWGTimeLimitSensor(coordinator, user_id),
+            TWGBlockedDomainsSensor(coordinator, user_id)
+        ])
+
+    async_add_entities(entities)
+
+    # Set up dynamic entity creation
+    @callback
+    def async_add_new_user(user_id: str) -> None:
+        """Add entities for a new user."""
+        new_entities = [
+            TWGUserSensor(coordinator, user_id),
+            TWGActivitySensor(coordinator, user_id),
+            TWGTimeLimitSensor(coordinator, user_id),
+            TWGBlockedDomainsSensor(coordinator, user_id)
         ]
+        async_add_entities(new_entities)
+
+    # Register listener for new users
+    coordinator.async_add_listener(
+        lambda: hass.async_create_task(
+            async_check_new_users(coordinator, async_add_new_user)
+        )
     )
 
-class TWGUserSensor(SensorEntity):
-    """Sensor for tracking the current user."""
+async def async_check_new_users(
+    coordinator: DataUpdateCoordinator,
+    add_callback: callable
+) -> None:
+    """Check for new users and add entities."""
+    for user_id in coordinator.get_active_users():
+        if not coordinator.hass.states.get(f"sensor.twg_{user_id}_status"):
+            add_callback(user_id)
 
-    _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.ENUM
-    _attr_state_class = SensorStateClass.MEASUREMENT
+class TWGBaseSensor(CoordinatorEntity, SensorEntity):
+    """Base class for TWG sensors."""
 
-    def __init__(self, name: str, entry_id: str, store: TWGStore) -> None:
+    def __init__(
+        self,
+        coordinator: DataUpdateCoordinator,
+        user_id: str,
+    ) -> None:
         """Initialize the sensor."""
-        self._attr_unique_id = f"{entry_id}_user"
-        self._attr_name = "Current User"
+        super().__init__(coordinator)
+        self.user_id = user_id
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=name,
+            identifiers={(DOMAIN, user_id)},
+            name=f"TWG {coordinator.get_active_users()[user_id]['friendly_name']}",
             manufacturer="Timewise Guardian",
+            model=VERSION,
+            sw_version=VERSION,
         )
-        self._store = store
-        self._state: str | None = None
 
     @property
-    def native_value(self) -> StateType:
-        """Return the current user."""
-        return self._state or "Unknown"
-
-    async def async_update(self) -> None:
-        """Update the sensor state."""
-        # Get current active user from store
-        active_user = await self._store.get_active_user()
-        if active_user:
-            self._state = active_user.name
-
-class TWGActivitySensor(SensorEntity):
-    """Sensor for tracking the current activity."""
-
-    _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.ENUM
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, name: str, entry_id: str, store: TWGStore) -> None:
-        """Initialize the sensor."""
-        self._attr_unique_id = f"{entry_id}_activity"
-        self._attr_name = "Current Activity"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=name,
-            manufacturer="Timewise Guardian",
-        )
-        self._store = store
-        self._state: dict[str, Any] = {}
+    def should_poll(self) -> bool:
+        """No need to poll. Coordinator notifies entity of updates."""
+        return False
 
     @property
-    def native_value(self) -> StateType:
-        """Return the current activity."""
-        return self._state.get("activity", "Idle")
+    def available(self) -> bool:
+        """Return if entity is available."""
+        return self.coordinator.last_update_success and self.coordinator.is_user_active(self.user_id)
+
+class TWGUserSensor(TWGBaseSensor):
+    """Sensor for user status."""
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"twg_{self.user_id}_status"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"TWG {self.coordinator.get_active_users()[self.user_id]['friendly_name']} Status"
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the sensor."""
+        return self.coordinator.data["states"].get(self.user_id, {}).get("state", "unknown")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
-        return {
-            "category": self._state.get("category", "Unknown"),
-            "window_title": self._state.get("window_title", ""),
-            "process_name": self._state.get("process_name", ""),
-            "start_time": self._state.get("start_time", datetime.now().isoformat()),
-        }
+        """Return the state attributes."""
+        return self.coordinator.get_user_config(self.user_id)
 
-    async def async_update(self) -> None:
-        """Update the sensor state."""
-        # Get current activity from store
-        activity = await self._store.get_current_activity()
-        if activity:
-            self._state = activity
-
-class TWGTimeLimitSensor(SensorEntity):
-    """Sensor for tracking time limits."""
-
-    _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.DURATION
-    _attr_state_class = SensorStateClass.MEASUREMENT
-    _attr_native_unit_of_measurement = "min"
-
-    def __init__(self, name: str, entry_id: str, store: TWGStore) -> None:
-        """Initialize the sensor."""
-        self._attr_unique_id = f"{entry_id}_time_limit"
-        self._attr_name = "Time Remaining"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry_id)},
-            name=name,
-            manufacturer="Timewise Guardian",
-        )
-        self._store = store
-        self._state: dict[str, Any] = {}
+class TWGActivitySensor(TWGBaseSensor):
+    """Sensor for user activity."""
 
     @property
-    def native_value(self) -> StateType:
-        """Return the remaining time."""
-        return self._state.get("time_remaining", 0)
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"twg_{self.user_id}_activity"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"TWG {self.coordinator.get_active_users()[self.user_id]['friendly_name']} Activity"
+
+    @property
+    def native_value(self) -> str:
+        """Return the state of the sensor."""
+        state = self.coordinator.data["states"].get(self.user_id, {})
+        return state.get("active_window", "unknown")
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return additional state attributes."""
+        """Return the state attributes."""
+        state = self.coordinator.data["states"].get(self.user_id, {})
         return {
-            "daily_limit": self._state.get("daily_limit", 0),
-            "total_used_today": self._state.get("total_used_today", 0),
-            "category": self._state.get("category", "Unknown"),
+            "process": state.get("process"),
+            "start_time": state.get("start_time"),
+            "duration": state.get("duration")
         }
 
-    async def async_update(self) -> None:
-        """Update the sensor state."""
-        # Get time limits from store
-        time_info = await self._store.get_time_limits()
-        if time_info:
-            self._state = time_info 
+class TWGTimeLimitSensor(TWGBaseSensor):
+    """Sensor for time limits."""
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"twg_{self.user_id}_time_limit"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"TWG {self.coordinator.get_active_users()[self.user_id]['friendly_name']} Time Limit"
+
+    @property
+    def native_value(self) -> Optional[int]:
+        """Return the state of the sensor."""
+        limits = self.coordinator.data["limits"].get(self.user_id, {})
+        return limits.get("daily_limit")
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        limits = self.coordinator.data["limits"].get(self.user_id, {})
+        return {
+            "time_used": limits.get("time_used", 0),
+            "time_remaining": limits.get("time_remaining", 0),
+            "reset_time": limits.get("reset_time")
+        }
+
+class TWGBlockedDomainsSensor(TWGBaseSensor):
+    """Sensor for blocked domains."""
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return f"twg_{self.user_id}_blocked"
+
+    @property
+    def name(self) -> str:
+        """Return the name of the sensor."""
+        return f"TWG {self.coordinator.get_active_users()[self.user_id]['friendly_name']} Blocked"
+
+    @property
+    def native_value(self) -> int:
+        """Return the state of the sensor."""
+        blocked = self.coordinator.data["blocked"].get(self.user_id, set())
+        return len(blocked)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return the state attributes."""
+        return {
+            "blocked_domains": list(self.coordinator.data["blocked"].get(self.user_id, set())),
+            "categories": self.coordinator.get_available_categories()
+        } 

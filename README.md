@@ -1,251 +1,137 @@
-# TimeWise Guardian Client
+# Timewise Guardian
 
-A cross-platform client application for the TimeWise Guardian parental control system, designed to work with Home Assistant.
-
-## Features
-
-- Real-time monitoring of computer usage
-- Process and window tracking
-- Browser activity monitoring
-- Integration with Home Assistant
-- Cross-platform support (Windows and Linux)
-- Configurable time limits and restrictions
-- User activity categorization
-- Notification system
+A computer usage monitoring and time management client for Home Assistant.
 
 ## Installation
 
-### Windows
-
-You can install the TimeWise Guardian client using pip:
-
 ```bash
-pip install timewise-guardian-client
+pip install timewise-guardian
 ```
 
-Or download the latest Windows executable from the [releases page](https://github.com/kimasplund/timewise-guardian/releases).
+## Quick Start
 
-### Linux
-
-Install the package using pip:
+The simplest way to start is to run:
 
 ```bash
-pip install timewise-guardian-client
+timewise-guardian -c homeassistant.local:8123
 ```
 
-Or download the latest Linux executable from the [releases page](https://github.com/kimasplund/timewise-guardian/releases).
+This will:
+1. Connect to your Home Assistant instance
+2. Detect the current system user
+3. Open a browser for authentication
+4. Save the configuration automatically
+5. Start monitoring
 
-#### Linux Dependencies
+The client creates a unique computer user entity in Home Assistant that combines both the computer name and system username (e.g., `sensor.twg_desktop_john` for user "john" on computer "desktop").
 
-On Ubuntu/Debian:
+## Command Line Options
 
 ```bash
-sudo apt-get install wmctrl python3-dbus
+timewise-guardian [OPTIONS]
+  -c, --connect URL     Connect to Home Assistant instance (e.g., homeassistant.local:8123)
+  -n, --name NAME      Set computer name (default: hostname)
+  -u, --user USER      Override system username (default: current user)
+  -i, --interval SECS  Set sync interval in seconds (default: 30)
+  --config PATH        Use custom config file
+  --debug             Enable debug logging
 ```
 
-On Fedora:
+### Examples
 
+Connect with custom computer name:
 ```bash
-sudo dnf install wmctrl python3-dbus
+timewise-guardian -c homeassistant.local:8123 -n desktop-pc
 ```
 
-## Configuration
+Connect with different system user:
+```bash
+timewise-guardian -c homeassistant.local:8123 -u different-user
+```
 
-1. Create a configuration file at one of these locations:
-   - Windows: `C:\ProgramData\TimeWise Guardian\config.yaml`
-   - Linux: `/etc/timewise-guardian/config.yaml`
-   - Or specify a custom location with the `-c` option
+## User Management
 
-2. Example configuration:
+The client creates unique computer user entities in Home Assistant that combine:
+- Computer identifier (hostname or custom name)
+- System username
+
+This allows:
+- Multiple computers with the same username (e.g., `twg_desktop_john`, `twg_laptop_john`)
+- Different usernames on the same computer (e.g., `twg_desktop_john`, `twg_desktop_jane`)
+- Alternative usernames for the same person (e.g., `twg_desktop_john`, `twg_shared_johnnyboy`)
+
+Each computer user entity can be mapped to a Home Assistant user through the UI, enabling:
+- One Home Assistant user to have multiple computer users
+- Different permissions per computer user
+- Tracking activity across multiple computers
+- User-specific time limits and restrictions
+
+### Example Scenarios
+
+1. Same person, different computers:
+   ```
+   twg_desktop_john -> maps to -> HA user "John"
+   twg_laptop_john -> maps to -> HA user "John"
+   ```
+
+2. Same person, different usernames:
+   ```
+   twg_desktop_john -> maps to -> HA user "John"
+   twg_shared_johnnyboy -> maps to -> HA user "John"
+   ```
+
+3. Different people sharing a computer:
+   ```
+   twg_desktop_john -> maps to -> HA user "John"
+   twg_desktop_jane -> maps to -> HA user "Jane"
+   ```
+
+## Manual Configuration
+
+If you prefer manual configuration, create a YAML file at:
+- Windows: `%APPDATA%/timewise-guardian/config.yaml`
+- Linux: `~/.config/timewise-guardian/config.yaml`
+- macOS: `~/Library/Application Support/timewise-guardian/config.yaml`
 
 ```yaml
-ha_url: "http://homeassistant.local:8123"
+ha_url: "http://your-home-assistant:8123"
 ha_token: "your_long_lived_access_token"
-
-user_mapping:
-  windows_username: "ha_username"
-  linux_username: "ha_username"
-
-categories:
-  games:
-    processes: ["*.exe"]
-    window_titles: ["*game*"]
-    browser_patterns:
-      urls: ["*game*"]
-      titles: ["*game*"]
-
-time_limits:
-  games: 120  # minutes
-
-time_restrictions:
-  games:
-    weekday:
-      start: "15:00"
-      end: "20:00"
-    weekend:
-      start: "10:00"
-      end: "22:00"
-
-notifications:
-  warning_threshold: 10  # minutes
-  warning_intervals: [30, 15, 10, 5, 1]
-  popup_duration: 10  # seconds
-  sound_enabled: true
+sync_interval: 30  # Update interval in seconds
+computer_id: "my-computer"  # Unique identifier for this computer
+system_user: "username"  # System username to monitor
 ```
 
-## Usage
+## Home Assistant Integration
 
-### Running as a Service
+The client creates the following entities:
 
-#### Windows
+- `sensor.twg_[computer]_[user]`: Computer user entity (e.g., `sensor.twg_desktop_john`)
+- `sensor.twg_activity`: Current computer activity state
+- `sensor.twg_blocked_urls`: Recently blocked URLs
+- `sensor.twg_browser_history`: Recent browser history
+- `sensor.twg_memory_usage`: Client memory usage
 
-Install as a service:
+Each computer user entity includes:
+- Computer ID
+- System username
+- Friendly name (e.g., "John on Desktop")
+- Mapped Home Assistant user (if set)
+- Current state (active/idle)
 
-```bash
-timewise-guardian-client --install
-```
-
-Uninstall the service:
-
-```bash
-timewise-guardian-client --uninstall
-```
-
-#### Linux
-
-Install as a systemd service:
-
-```bash
-sudo timewise-guardian-client --install
-```
-
-Uninstall the service:
-
-```bash
-sudo timewise-guardian-client --uninstall
-```
-
-### Running Manually
-
-Run the client with default configuration:
-
-```bash
-timewise-guardian-client
-```
-
-Specify a custom configuration file:
-
-```bash
-timewise-guardian-client -c /path/to/config.yaml
-```
-
-Enable debug logging:
-
-```bash
-timewise-guardian-client --debug
-```
+Use these entities in Home Assistant automations to:
+- Get notifications about blocked content
+- Track computer usage time
+- Set up time-based restrictions
+- Monitor user activity
+- Handle user-specific rules
 
 ## Development
 
-1. Clone the repository:
+For development setup:
 
 ```bash
 git clone https://github.com/kimasplund/timewise-guardian.git
 cd timewise-guardian
-```
-
-2. Create a virtual environment:
-
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux
-venv\Scripts\activate     # Windows
-```
-
-3. Install development dependencies:
-
-```bash
 pip install -e ".[dev]"
-```
-
-4. Run tests:
-
-```bash
 pytest tests/
-```
-
-## Monitoring Features
-
-### Activity Tracking
-- Real-time window and process monitoring
-- Browser history tracking (Firefox, Chrome, Edge)
-- YouTube content categorization
-- Application usage statistics
-- User session tracking
-
-### Time Management
-- Category-based time limits
-- Time restriction schedules
-- Warning notifications
-- Automatic enforcement
-
-### Data Collection
-- Application usage metrics
-- Browser activity data
-- Category statistics
-- Time limit compliance
-
-### Integration
-- Real-time Home Assistant updates
-- Custom sensor entities
-- Dashboard integration
-- Automation support
-
-## Troubleshooting
-
-### Common Issues
-1. Service won't start:
-   - Check service logs
-   - Verify Python installation
-   - Check configuration file permissions
-   - Verify service configuration
-
-2. No data in Home Assistant:
-   - Verify Home Assistant connection
-   - Check API token
-   - Review service logs
-   - Check network connectivity
-
-3. Browser tracking not working:
-   - Ensure browser history access
-   - Check browser support
-   - Verify user permissions
-   - Check browser profile paths
-
-### Debug Mode
-Enable debug logging:
-```bash
-timewise-guardian-client --debug
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Author
-
-Kim Asplund (kim.asplund@gmail.com)
-
-## Links
-
-- [Website](https://asplund.kim)
-- [GitHub Repository](https://github.com/kimasplund/timewise-guardian)
-- [Documentation](https://github.com/kimasplund/timewise-guardian/wiki) 
+``` 
