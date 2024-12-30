@@ -35,6 +35,15 @@ jobs:
           python -m pip install pytest pytest-asyncio pytest-cov
           python -m pip install homeassistant
           python -m pip install -e ".[test]"
+      
+      - name: Set up test environment
+        run: |
+          # Create config dir for Home Assistant
+          mkdir -p config/custom_components
+          # Link custom component into config
+          ln -s $PWD/custom_components/twg config/custom_components/twg
+          # Add config dir to PYTHONPATH
+          echo "PYTHONPATH=$PWD/config:$PYTHONPATH" >> $GITHUB_ENV
           
       - name: Verify installation
         run: |
@@ -42,11 +51,16 @@ jobs:
           pip list
           echo "Package structure:"
           find src/timewise_guardian_client -type f -name "*.py"
+          find config/custom_components -type f -name "*.py"
           echo "Python path:"
           python -c "import sys; print('\n'.join(sys.path))"
           echo "Can import client:"
           python -c "from timewise_guardian_client.common.client import TWGClient; print('TWGClient imported successfully')"
+          echo "Can import coordinator:"
+          python -c "from custom_components.twg.coordinator import TWGCoordinator; print('TWGCoordinator imported successfully')"
       
       - name: Run tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/config:${{ env.PYTHONPATH }}
         run: |
           python -m pytest tests/ --cov=src/timewise_guardian_client --cov-report=term -v 
