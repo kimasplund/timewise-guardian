@@ -29,11 +29,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wmctrl python3-dbus libnotify-bin
       
-      - name: Install dependencies
+      - name: Install Python dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pytest pytest-asyncio pytest-cov
-          python -m pip install homeassistant
+          python -m pip install --upgrade pip wheel setuptools
+          python -m pip install homeassistant --upgrade
+          python -m pip install pytest pytest-asyncio pytest-cov pytest-homeassistant-custom-component
           python -m pip install -e ".[test]"
       
       - name: Set up test environment
@@ -45,18 +45,22 @@ jobs:
           # Add config dir to PYTHONPATH
           echo "PYTHONPATH=$PWD/config:$PYTHONPATH" >> $GITHUB_ENV
           
-      - name: Verify installation
+      - name: Verify package structure
         run: |
-          echo "Installed packages:"
+          echo "=== Python version ==="
+          python --version
+          echo "=== Installed packages ==="
           pip list
-          echo "Package structure:"
-          find src/timewise_guardian_client -type f -name "*.py"
-          find config/custom_components -type f -name "*.py"
-          echo "Python path:"
+          echo "=== Package structure ==="
+          find . -type f -name "*.py" | grep -v "venv"
+          
+      - name: Verify imports
+        run: |
+          echo "=== Python path ==="
           python -c "import sys; print('\n'.join(sys.path))"
-          echo "Can import client:"
+          echo "=== Import tests ==="
+          python -c "import homeassistant; print(f'Home Assistant {homeassistant.__version__}')"
           python -c "from timewise_guardian_client.common.client import TWGClient; print('TWGClient imported successfully')"
-          echo "Can import coordinator:"
           python -c "from custom_components.twg.coordinator import TWGCoordinator; print('TWGCoordinator imported successfully')"
       
       - name: Run tests
