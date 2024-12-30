@@ -44,7 +44,7 @@ jobs:
         python -m pip install --upgrade pip wheel setuptools
         python -m pip install pytest-cov==3.0.0
         python -m pip install pytest-asyncio pytest-homeassistant-custom-component
-        python -m pip install homeassistant==2024.12.4
+        python -m pip install homeassistant
         python -m pip install hatch
         python -m pip install -e ".[test]"
       shell: bash
